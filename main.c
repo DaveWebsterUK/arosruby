@@ -12,6 +12,42 @@
 
 #include "ruby.h"
 
+#ifdef __AROS__ 
+#include <proto/exec.h> 
+#include <proto/bsdsocket.h> 
+#include <aros/symbolsets.h> 
+
+#include <stdlib.h> 
+#include <exec/types.h> 
+#include <sys/arosc.h> 
+
+int d; 
+char **environ; 
+
+struct Library *SocketBase; 
+
+int aros_init(void) 
+{ 
+
+    SocketBase = OpenLibrary("bsdsocket.library", 4); 
+    if (!SocketBase) 
+    { 
+        fprintf(stderr,"Can't open bsdsocket.library\n"); 
+        return FALSE; 
+    } 
+
+    return TRUE; 
+} 
+
+void aros_exit(void) 
+{ 
+    CloseLibrary(SocketBase); 
+} 
+
+ADD2INIT(aros_init, 0); 
+ADD2EXIT(aros_exit, 0); 
+#endif
+
 #ifdef __human68k__
 int _stacksize = 262144;
 #endif
@@ -34,6 +70,31 @@ main(argc, argv, envp)
     int argc;
     char **argv, **envp;
 {
+
+
+#ifdef __AROS__ 
+
+    int size = __env_get_environ (NULL, 0);
+    char **envp_aros = (char **) malloc(size);
+    if (envp_aros) 
+    { 
+        if (__env_get_environ(envp_aros, size) != -1) 
+        { 
+            environ = envp_aros; 
+        } 
+        else 
+        { 
+            free (envp_aros);  
+            return d; 
+        } 
+    } 
+    else
+    {
+        return d; 
+    }
+
+#endif
+
 #ifdef _WIN32
     NtInitialize(&argc, &argv);
 #endif

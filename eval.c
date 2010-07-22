@@ -76,6 +76,12 @@ char *strrchr _((const char*,const char));
 #include <net/socket.h>
 #endif
 
+#ifdef __AROS__ 
+#include <proto/exec.h> 
+#include <proto/bsdsocket.h> 
+#include <aros/symbolsets.h> 
+#endif
+
 #ifdef __MACOS__
 #include "macruby_private.h"
 #endif

@@ -1,4 +1,4 @@
-#option nodynamic
+option nodynamic
 
 #Win32API
 #bigdecimal

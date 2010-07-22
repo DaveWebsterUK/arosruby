@@ -27,6 +27,14 @@
 #define USE_TRAP_MASK 0
 #endif
 
+
+
+#ifndef NSIG
+#  ifdef __AROS__ 
+#    define NSIG 32      /* For AROS */
+#  endif
+#endif
+
 #ifndef NSIG
 # ifdef DJGPP
 #  define NSIG SIGMAX

@@ -115,6 +115,13 @@ static VALUE S_Tms;
 #define preserving_errno(stmts) \
 	do {int saved_errno = errno; stmts; errno = saved_errno;} while (0)
 
+/*
+ Borrowed from http://utilitybase.com/ref/?keyword=resource.h&funcgroup=GeekGadgets&action=Search
+*/
+#ifdef __AROS__ 
+#define	RLIM_INFINITY	0x7fffffff
+#endif
+
 
 /*
  *  call-seq:
@@ -1326,7 +1333,7 @@ rb_f_fork(obj)
     fflush(stderr);
 #endif
 
-    switch (pid = fork()) {
+    switch (pid = vfork()) {/* AROS - changed fork to vfork */
       case 0:
 #ifdef linux
 	after_exec();
@@ -1566,7 +1573,7 @@ rb_f_system(argc, argv)
 
     chfunc = signal(SIGCHLD, SIG_DFL);
   retry:
-    pid = fork();
+    pid = vfork();/* AROS - changed fork to vfork */
     if (pid == 0) {
 	/* child process */
 	rb_thread_atfork();

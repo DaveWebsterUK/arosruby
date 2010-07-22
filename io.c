@@ -3217,7 +3217,7 @@ retry:
     }
 
   retry:
-    switch ((pid = fork())) {
+    switch ((pid = vfork())) {/* AROS - changed fork to vfork */
       case 0:			/* child */
 	if (modef & FMODE_READABLE) {
 	    close(pr[0]);
