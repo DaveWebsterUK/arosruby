@@ -14709,6 +14709,9 @@ _ACEOF
   fi
 fi
 
+#AROS - FIX
+ac_cv_func_setpgrp_void=yes
+
 { echo "$as_me:$LINENO: checking whether getpgrp requires zero arguments" >&5
 echo $ECHO_N "checking whether getpgrp requires zero arguments... $ECHO_C" >&6; }
 if test "${ac_cv_func_getpgrp_void+set}" = set; then

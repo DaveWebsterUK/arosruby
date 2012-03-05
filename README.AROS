@@ -1,0 +1,21 @@
+== About ==
+
+This is a Ruby 1.8.7 port to the AROS operating system.  Source for the
+AROS port can be found at http://code.google.com/p/arosruby/ The orignal source
+code for Ruby can be found at http://www.ruby-lang.org/
+
+== Compiling ==
+
+Two convenience build scripts have been included which will supply arguments to ./configure to allow building on AROS.
+ * aros_configure.sh - for building under AROS Native
+ * aros_hosted_configure.sh - for building under AROS Hosted (Linux)
+
+Note, that in order to run ruby you will need to have networking configured to
+start the bsdsocket library.
+
+== Thanks ==
+
+Many thanks to Mazze from aros.exec.org for his assistance on a few hurdles in
+the port.
+
+March 05 2012 - Dave Webster

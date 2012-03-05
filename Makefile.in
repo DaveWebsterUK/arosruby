@@ -131,12 +131,6 @@ fake.rb:	Makefile
 		  RUBY_PLATFORM = "@arch@"; \
 		  RUBY_VERSION = "@MAJOR@.@MINOR@.@TEENY@"; \
 		end; \
-		if RUBY_PLATFORM =~ /mswin|bccwin|mingw/; \
-		  class File; \
-		    remove_const :ALT_SEPARATOR; \
-		    ALT_SEPARATOR = "\\"; \
-		  end; \
-		end; \
 		' > $@
 
 Makefile:	$(srcdir)/Makefile.in
