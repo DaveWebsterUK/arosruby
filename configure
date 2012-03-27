@@ -17542,6 +17542,15 @@ esac
 RUBY_LIB_PATH="${RUBY_LIB_PREFIX}/${MAJOR}.${MINOR}"
 RUBY_SITE_LIB_PATH2="${RUBY_SITE_LIB_PATH}/${MAJOR}.${MINOR}"
 
+##AROS
+case "$target_os" in
+  aros*)
+	RUBY_LIB_PATH="SYS:/Development/lib/ruby/1.8"
+	RUBY_SITE_LIB_PATH="SYS:/Development/lib/ruby/site_ruby"
+	RUBY_SITE_LIB_PATH2="SYS:/Development/lib/ruby/site_ruby/1.8"
+    ;;
+esac
+
 cat >>confdefs.h <<_ACEOF
 #define RUBY_LIB "${RUBY_LIB_PATH}"
 _ACEOF
@@ -17572,6 +17581,14 @@ case "$target_os" in
     RUBY_VENDOR_LIB_PATH="$VENDOR_DIR";;
 esac
 RUBY_VENDOR_LIB_PATH2="${RUBY_VENDOR_LIB_PATH}/${MAJOR}.${MINOR}"
+
+##AROS
+case "$target_os" in
+  aros*)
+	RUBY_VENDOR_LIB_PATH="SYS:/Development/lib/ruby/vendor_ruby"
+	RUBY_VENDOR_LIB_PATH2="SYS:/Development/lib/ruby/vendor_ruby/1.8"
+    ;;
+esac
 
 cat >>confdefs.h <<_ACEOF
 #define RUBY_LIB "${RUBY_LIB_PATH}"

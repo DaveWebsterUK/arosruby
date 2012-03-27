@@ -1,14 +1,14 @@
 option nodynamic
 
 #Win32API
-#bigdecimal
+bigdecimal
 #curses
 #dbm
-#digest
-#digest/md5
-#digest/rmd160
-#digest/sha1
-#digest/sha2
+digest
+digest/md5
+digest/rmd160
+digest/sha1
+digest/sha2
 #dl
 #enumerator
 #etc
@@ -16,19 +16,19 @@ option nodynamic
 #gdbm
 #iconv
 #io/wait
-#nkf
+nkf
 #pty
 #openssl
 #racc/cparse
-#readline
+readline
 #sdbm
 #socket
-#stringio
-#strscan
+stringio
+strscan
 #syck
 #syslog
 #tcltklib
 #thread
 #tk
 #win32ole
-#zlib
+zlib
