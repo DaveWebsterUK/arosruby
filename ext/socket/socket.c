@@ -2,8 +2,8 @@
 
   socket.c -
 
-  $Author: nobu $
-  $Date: 2008-04-15 12:35:55 +0900 (Tue, 15 Apr 2008) $
+  $Author: shyouhei $
+  $Date: 2011-05-21 07:25:41 +0900 (Sat, 21 May 2011) $
   created at: Thu Mar 31 12:21:29 JST 1994
 
   Copyright (C) 1993-2001 Yukihiro Matsumoto
@@ -840,7 +840,7 @@ host_str(host, hbuf, len)
 	return NULL;
     }
     else if (rb_obj_is_kind_of(host, rb_cInteger)) {
-	long i = NUM2LONG(host);
+	unsigned long i = NUM2ULONG(host);
 
 	make_inetaddr(htonl(i), hbuf, len);
 	return hbuf;
@@ -893,10 +893,10 @@ port_str(port, pbuf, len)
 }
 
 #ifndef NI_MAXHOST
-# define 1025
+# define NI_MAXHOST 1025
 #endif
 #ifndef NI_MAXSERV
-# define 32
+# define NI_MAXSERV 32
 #endif
 
 static struct addrinfo*
@@ -3218,6 +3218,10 @@ make_addrinfo(res0)
     }
     base = rb_ary_new();
     for (res = res0; res; res = res->ai_next) {
+#if defined(AF_INET6) && !defined(INET6)	/* workaround for Windows */
+	if (res->ai_addr->sa_family == AF_INET6)
+	    continue;
+#endif
 	ary = ipaddr(res->ai_addr);
 	rb_ary_push(ary, INT2FIX(res->ai_family));
 	rb_ary_push(ary, INT2FIX(res->ai_socktype));

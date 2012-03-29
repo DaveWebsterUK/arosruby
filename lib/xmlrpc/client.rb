@@ -268,7 +268,7 @@ Note: Inherited methods from class (({Object})) cannot be used as XML-RPC names,
 
 
 = History
-    $Id: client.rb 16048 2008-04-15 17:11:48Z knu $
+    $Id: client.rb 18091 2008-07-16 17:07:44Z shyouhei $
 
 =end
 
@@ -567,6 +567,7 @@ module XMLRPC
 
       set_cookies = resp.get_fields("Set-Cookie")
       if set_cookies and !set_cookies.empty?
+        require 'webrick/cookie'
         @cookie = set_cookies.collect do |set_cookie|
           cookie = WEBrick::Cookie.parse_set_cookie(set_cookie)
           WEBrick::Cookie.new(cookie.name, cookie.value).to_s

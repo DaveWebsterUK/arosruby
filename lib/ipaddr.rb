@@ -7,7 +7,7 @@
 #
 # You can redistribute and/or modify it under the same terms as Ruby.
 #
-# $Id: ipaddr.rb 15822 2008-03-21 12:16:15Z knu $
+# $Id: ipaddr.rb 18049 2008-07-12 15:08:29Z shyouhei $
 #
 # Contact:
 #   - Akinori MUSHA <knu@iDaemons.org> (current maintainer)
@@ -483,7 +483,7 @@ class IPAddr
     if prefixlen
       mask!(prefixlen)
     else
-      @mask_addr = (family == Socket::AF_INET) ? IN4MASK : IN6MASK
+      @mask_addr = (@family == Socket::AF_INET) ? IN4MASK : IN6MASK
     end
   end
 

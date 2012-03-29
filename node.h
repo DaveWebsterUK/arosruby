@@ -2,8 +2,8 @@
 
   node.h -
 
-  $Author: knu $
-  $Date: 2008-05-23 01:07:42 +0900 (Fri, 23 May 2008) $
+  $Author: shyouhei $
+  $Date: 2009-02-25 15:15:55 +0900 (Wed, 25 Feb 2009) $
   created at: Fri May 28 15:14:02 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -319,7 +319,7 @@ extern NODE *ruby_top_cref;
 #define NEW_MODULE(n,b) NEW_NODE(NODE_MODULE,n,NEW_SCOPE(b),0)
 #define NEW_COLON2(c,i) NEW_NODE(NODE_COLON2,c,i,0)
 #define NEW_COLON3(i) NEW_NODE(NODE_COLON3,0,i,0)
-#define NEW_CREF(c) (NEW_NODE(NODE_CREF,0,0,c))
+#define NEW_CREF(c,n) NEW_NODE(NODE_CREF,c,0,n)
 #define NEW_DOT2(b,e) NEW_NODE(NODE_DOT2,b,e,0)
 #define NEW_DOT3(b,e) NEW_NODE(NODE_DOT3,b,e,0)
 #define NEW_ATTRSET(a) NEW_NODE(NODE_ATTRSET,a,0,0)
@@ -409,13 +409,13 @@ struct rb_thread {
 
     VALUE result;
 
-    long   stk_len;
-    long   stk_max;
+    size_t stk_len;
+    size_t stk_max;
     VALUE *stk_ptr;
     VALUE *stk_pos;
 #ifdef __ia64
-    long   bstr_len;
-    long   bstr_max;
+    size_t bstr_len;
+    size_t bstr_max;
     VALUE *bstr_ptr;
     VALUE *bstr_pos;
 #endif
@@ -467,6 +467,19 @@ extern VALUE (*ruby_sandbox_save)_((rb_thread_t));
 extern VALUE (*ruby_sandbox_restore)_((rb_thread_t));
 extern rb_thread_t rb_curr_thread;
 extern rb_thread_t rb_main_thread;
+
+enum {
+    RAISED_EXCEPTION     = 0x1000,
+    RAISED_STACKOVERFLOW = 0x2000,
+    RAISED_NOMEMORY      = 0x4000,
+    RAISED_MASK          = 0xf000
+};
+int rb_thread_set_raised(rb_thread_t th);
+int rb_thread_reset_raised(rb_thread_t th);
+#define rb_thread_raised_set(th, f)   ((th)->flags |= (f))
+#define rb_thread_raised_reset(th, f) ((th)->flags &= ~(f))
+#define rb_thread_raised_p(th, f)     (((th)->flags & (f)) != 0)
+#define rb_thread_raised_clear(th)    (rb_thread_raised_reset(th, RAISED_MASK))
 
 #if defined(__cplusplus)
 }  /* extern "C" { */

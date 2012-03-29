@@ -2,8 +2,8 @@
 
   ruby.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2008-07-10 18:38:35 +0900 (Thu, 10 Jul 2008) $
   created at: Tue Aug 10 12:47:31 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -809,6 +809,9 @@ proc_options(argc, argv)
 	}
 	else {
 	    script = argv[0];
+#if defined DOSISH || defined __CYGWIN__
+	    translate_char(argv[0], '\\', '/');
+#endif
 	    if (script[0] == '\0') {
 		script = "-";
 	    }
@@ -825,10 +828,10 @@ proc_options(argc, argv)
 		if (!script) script = argv[0];
 		script = ruby_sourcefile = rb_source_filename(script);
 		script_node = NEW_NEWLINE(0);
-	    }
 #if defined DOSISH || defined __CYGWIN__
-	    translate_char(script, '\\', '/');
+		translate_char(ruby_sourcefile, '\\', '/');
 #endif
+	    }
 	    argc--; argv++;
 	}
     }
@@ -1036,15 +1039,50 @@ set_arg0space()
 #define set_arg0space() ((void)0)
 #endif
 
+static int
+get_arglen(int argc, char **argv)
+{
+    char *s = argv[0];
+    int i;
+
+    if (!argc) return 0;
+    s += strlen(s);
+    /* See if all the arguments are contiguous in memory */
+    for (i = 1; i < argc; i++) {
+	if (argv[i] == s + 1) {
+	    s++;
+	    s += strlen(s);	/* this one is ok too */
+	}
+	else {
+	    break;
+	}
+    }
+#if defined(USE_ENVSPACE_FOR_ARG0)
+    if (environ && (s == environ[0])) {
+	s += strlen(s);
+	for (i = 1; environ[i]; i++) {
+	    if (environ[i] == s + 1) {
+		s++;
+		s += strlen(s);	/* this one is ok too */
+	    }
+	}
+	ruby_setenv("", NULL); /* duplicate environ vars */
+    }
+#endif
+    return s - argv[0];
+}
+
 static void
 set_arg0(val, id)
     VALUE val;
     ID id;
 {
+    VALUE progname;
     char *s;
     long i;
+    int j;
 #if !defined(PSTAT_SETCMD) && !defined(HAVE_SETPROCTITLE)
-    static int len;
+    static int len = 0;
 #endif
 
     if (origargv == 0) rb_raise(rb_eRuntimeError, "$0 not initialized");
@@ -1065,33 +1103,13 @@ set_arg0(val, id)
 	j.pst_command = s;
 	pstat(PSTAT_SETCMD, j, i, 0, 0);
     }
-    rb_progname = rb_tainted_str_new(s, i);
+    progname = rb_tainted_str_new(s, i);
 #elif defined(HAVE_SETPROCTITLE)
     setproctitle("%.*s", (int)i, s);
-    rb_progname = rb_tainted_str_new(s, i);
+    progname = rb_tainted_str_new(s, i);
 #else
     if (len == 0) {
-	char *s = origargv[0];
-	int i;
-
-	s += strlen(s);
-	/* See if all the arguments are contiguous in memory */
-	for (i = 1; i < origargc; i++) {
-	    if (origargv[i] == s + 1) {
-		s++;
-		s += strlen(s);	/* this one is ok too */
-	    }
-	    else {
-		break;
-	    }
-	}
-#if defined(USE_ENVSPACE_FOR_ARG0)
-	if (s + 1 == envspace.begin) {
-	    s = envspace.end;
-	    ruby_setenv("", NULL); /* duplicate environ vars */
-	}
-#endif
-	len = s - origargv[0];
+	len = get_arglen(origargc, origargv);
     }
 
     if (i >= len) {
@@ -1101,10 +1119,13 @@ set_arg0(val, id)
     s = origargv[0] + i;
     *s = '\0';
     if (++i < len) memset(s + 1, ' ', len - i);
-    for (i = 1; i < origargc; i++)
-	origargv[i] = s;
-    rb_progname = rb_tainted_str_new2(origargv[0]);
+    for (i = len-1, j = origargc-1; j > 0 && i >= 0; --i, --j) {
+	origargv[j] = origargv[0] + i;
+	*origargv[j] = '\0';
+    }
+    progname = rb_tainted_str_new2(origargv[0]);
 #endif
+    rb_progname = rb_obj_freeze(progname);
 }
 
 void
@@ -1112,7 +1133,7 @@ ruby_script(name)
     const char *name;
 {
     if (name) {
-	rb_progname = rb_tainted_str_new2(name);
+	rb_progname = rb_obj_freeze(rb_tainted_str_new2(name));
 	ruby_sourcefile = rb_source_filename(name);
     }
 }

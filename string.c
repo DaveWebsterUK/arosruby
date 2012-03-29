@@ -2,8 +2,8 @@
 
   string.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2011-12-28 21:47:15 +0900 (Wed, 28 Dec 2011) $
   created at: Mon Aug  9 17:12:58 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -313,6 +313,7 @@ rb_obj_as_string(obj)
     return str;
 }
 
+static VALUE rb_str_s_alloc _((VALUE));
 static VALUE rb_str_replace _((VALUE, VALUE));
 
 VALUE
@@ -459,23 +460,18 @@ rb_str_times(str, times)
  */
 
 static VALUE
-rb_str_format(str, arg)
+rb_str_format_m(str, arg)
     VALUE str, arg;
 {
-    VALUE *argv;
+    volatile VALUE tmp = rb_check_array_type(arg);
 
-    if (TYPE(arg) == T_ARRAY) {
-	argv = ALLOCA_N(VALUE, RARRAY(arg)->len + 1);
-	argv[0] = str;
-	MEMCPY(argv+1, RARRAY(arg)->ptr, VALUE, RARRAY(arg)->len);
-	return rb_f_sprintf(RARRAY(arg)->len+1, argv);
+    if (!NIL_P(tmp)) {
+	return rb_str_format(RARRAY_LEN(tmp), RARRAY_PTR(tmp), str);
     }
-
-    argv = ALLOCA_N(VALUE, 2);
-    argv[0] = str;
-    argv[1] = arg;
-    return rb_f_sprintf(2, argv);
+    return rb_str_format(1, &arg, str);
 }
+
+static const char null_str[] = "";
 
 static int
 str_independent(str)
@@ -487,6 +483,7 @@ str_independent(str)
     if (OBJ_FROZEN(str)) rb_error_frozen("string");
     if (!OBJ_TAINTED(str) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't modify string");
+    if (RSTRING(str)->ptr == null_str) return 0;
     if (!FL_TEST(str, ELTS_SHARED)) return 1;
     return 0;
 }
@@ -545,8 +542,20 @@ rb_str_associated(str)
     return Qfalse;
 }
 
-static const char null_str[] = "";
-#define null_str ((char *)null_str)
+#define make_null_str(s) do { \
+	FL_SET(s, ELTS_SHARED); \
+	RSTRING(s)->ptr = (char *)null_str; \
+	RSTRING(s)->aux.shared = 0; \
+    } while (0)
+
+static VALUE
+rb_str_s_alloc(klass)
+    VALUE klass;
+{
+    VALUE str = str_alloc(klass);
+    make_null_str(str);
+    return str;
+}
 
 VALUE
 rb_string_value(ptr)
@@ -558,8 +567,7 @@ rb_string_value(ptr)
 	*ptr = s;
     }
     if (!RSTRING(s)->ptr) {
-	FL_SET(s, ELTS_SHARED);
-	RSTRING(s)->ptr = null_str;
+	make_null_str(s);
     }
     return s;
 }
@@ -590,8 +598,7 @@ rb_check_string_type(str)
 {
     str = rb_check_convert_type(str, T_STRING, "String", "to_str");
     if (!NIL_P(str) && !RSTRING(str)->ptr) {
-	FL_SET(str, ELTS_SHARED);
-	RSTRING(str)->ptr = null_str;
+	make_null_str(str);
     }
     return str;
 }
@@ -709,19 +716,19 @@ rb_str_resize(str, len)
     return str;
 }
 
-VALUE
-rb_str_buf_cat(str, ptr, len)
+static VALUE
+str_buf_cat(str, ptr, len)
     VALUE str;
     const char *ptr;
     long len;
 {
-    long capa, total;
+    long capa, total, off = -1;;
 
-    if (len == 0) return str;
-    if (len < 0) {
-	rb_raise(rb_eArgError, "negative string size (or size too big)");
-    }
     rb_str_modify(str);
+    if (ptr >= RSTRING(str)->ptr && ptr <= RSTRING(str)->ptr + RSTRING(str)->len) {
+        off = ptr - RSTRING(str)->ptr;
+    }
+    if (len == 0) return 0;
     if (FL_TEST(str, STR_ASSOC)) {
 	FL_UNSET(str, STR_ASSOC);
 	capa = RSTRING(str)->aux.capa = RSTRING(str)->len;
@@ -729,18 +736,41 @@ rb_str_buf_cat(str, ptr, len)
     else {
 	capa = RSTRING(str)->aux.capa;
     }
+    if (RSTRING(str)->len >= LONG_MAX - len) {
+	rb_raise(rb_eArgError, "string sizes too big");
+    }
     total = RSTRING(str)->len+len;
     if (capa <= total) {
 	while (total > capa) {
+	    if (capa + 1 >= LONG_MAX / 2) {
+		capa = total;
+		break;
+	    }
 	    capa = (capa + 1) * 2;
 	}
 	RESIZE_CAPA(str, capa);
+    }
+    if (off != -1) {
+        ptr = RSTRING(str)->ptr + off;
     }
     memcpy(RSTRING(str)->ptr + RSTRING(str)->len, ptr, len);
     RSTRING(str)->len = total;
     RSTRING(str)->ptr[total] = '\0'; /* sentinel */
 
     return str;
+}
+
+VALUE
+rb_str_buf_cat(str, ptr, len)
+    VALUE str;
+    const char *ptr;
+    long len;
+{
+    if (len == 0) return str;
+    if (len < 0) {
+	rb_raise(rb_eArgError, "negative string size (or size too big)");
+    }
+    return str_buf_cat(str, ptr, len);
 }
 
 VALUE
@@ -784,29 +814,8 @@ VALUE
 rb_str_buf_append(str, str2)
     VALUE str, str2;
 {
-    long capa, len;
-
-    rb_str_modify(str);
-    if (FL_TEST(str, STR_ASSOC)) {
-	FL_UNSET(str, STR_ASSOC);
-	capa = RSTRING(str)->aux.capa = RSTRING(str)->len;
-    }
-    else {
-	capa = RSTRING(str)->aux.capa;
-    }
-    len = RSTRING(str)->len+RSTRING(str2)->len;
-    if (capa <= len) {
-	while (len > capa) {
-	    capa = (capa + 1) * 2;
-	}
-	RESIZE_CAPA(str, capa);
-    }
-    memcpy(RSTRING(str)->ptr + RSTRING(str)->len,
-	   RSTRING(str2)->ptr, RSTRING(str2)->len);
-    RSTRING(str)->len += RSTRING(str2)->len;
-    RSTRING(str)->ptr[RSTRING(str)->len] = '\0'; /* sentinel */
+    str_buf_cat(str, RSTRING(str2)->ptr, RSTRING(str2)->len);
     OBJ_INFECT(str, str2);
-
     return str;
 }
 
@@ -866,13 +875,15 @@ rb_str_concat(str1, str2)
     return str1;
 }
 
+static unsigned long hash_seed;
+
 int
 rb_str_hash(str)
     VALUE str;
 {
     register long len = RSTRING(str)->len;
     register char *p = RSTRING(str)->ptr;
-    register int key = 0;
+    register unsigned long key = hash_seed;
 
 #if defined(HASH_ELFHASH)
     register unsigned int g;
@@ -896,6 +907,7 @@ rb_str_hash(str)
     while (len--) {
 	key = key*65599 + *p;
 	p++;
+	key = (key << 13) | (key >> ((sizeof(unsigned long) * CHAR_BIT) - 13));
     }
     key = key + (key>>5);
 #endif
@@ -2313,9 +2325,18 @@ rb_str_replace(str, str2)
 	RSTRING(str)->aux.shared = RSTRING(str2)->aux.shared;
     }
     else {
-	rb_str_modify(str);
-	rb_str_resize(str, RSTRING(str2)->len);
-	memcpy(RSTRING(str)->ptr, RSTRING(str2)->ptr, RSTRING(str2)->len);
+	if (str_independent(str)) {
+	    rb_str_resize(str, RSTRING(str2)->len);
+	    memcpy(RSTRING(str)->ptr, RSTRING(str2)->ptr, RSTRING(str2)->len);
+	    if (!RSTRING(str)->ptr) {
+		make_null_str(str);
+	    }
+	}
+	else {
+	    RSTRING(str)->ptr = RSTRING(str2)->ptr;
+	    RSTRING(str)->len = RSTRING(str2)->len;
+	    str_make_independent(str);
+	}
 	if (FL_TEST(str2, STR_ASSOC)) {
 	    FL_SET(str, STR_ASSOC);
 	    RSTRING(str)->aux.shared = RSTRING(str2)->aux.shared;
@@ -2623,8 +2644,8 @@ rb_str_inspect(str)
     p = RSTRING(str)->ptr; pend = p + RSTRING(str)->len;
     while (p < pend) {
 	char c = *p++;
-	if (ismbchar(c) && p < pend) {
-	    int len = mbclen(c);
+	int len;
+	if (ismbchar(c) && p - 1 + (len = mbclen(c)) <= pend) {
 	    rb_str_buf_cat(result, p - 1, len);
 	    p += len - 1;
 	}
@@ -4479,7 +4500,7 @@ static VALUE
 rb_str_crypt(str, salt)
     VALUE str, salt;
 {
-    extern char *crypt();
+    extern char *crypt _((const char *, const char*));
     VALUE result;
     const char *s;
 
@@ -4913,7 +4934,7 @@ Init_String()
     rb_cString  = rb_define_class("String", rb_cObject);
     rb_include_module(rb_cString, rb_mComparable);
     rb_include_module(rb_cString, rb_mEnumerable);
-    rb_define_alloc_func(rb_cString, str_alloc);
+    rb_define_alloc_func(rb_cString, rb_str_s_alloc);
     rb_define_method(rb_cString, "initialize", rb_str_init, -1);
     rb_define_method(rb_cString, "initialize_copy", rb_str_replace, 1);
     rb_define_method(rb_cString, "<=>", rb_str_cmp_m, 1);
@@ -4923,7 +4944,7 @@ Init_String()
     rb_define_method(rb_cString, "casecmp", rb_str_casecmp, 1);
     rb_define_method(rb_cString, "+", rb_str_plus, 1);
     rb_define_method(rb_cString, "*", rb_str_times, 1);
-    rb_define_method(rb_cString, "%", rb_str_format, 1);
+    rb_define_method(rb_cString, "%", rb_str_format_m, 1);
     rb_define_method(rb_cString, "[]", rb_str_aref_m, -1);
     rb_define_method(rb_cString, "[]=", rb_str_aset_m, -1);
     rb_define_method(rb_cString, "insert", rb_str_insert, 2);
@@ -5044,4 +5065,6 @@ Init_String()
     rb_fs = Qnil;
     rb_define_variable("$;", &rb_fs);
     rb_define_variable("$-F", &rb_fs);
+
+    hash_seed = rb_genrand_int32();
 }

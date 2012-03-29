@@ -2,8 +2,8 @@
 
   time.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2009-07-13 01:42:27 +0900 (Mon, 13 Jul 2009) $
   created at: Tue Dec 28 14:31:59 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -192,11 +192,17 @@ time_timeval(time, interval)
 	    double f, d;
 
 	    d = modf(RFLOAT(time)->value, &f);
+	    if (d >= 0) {
+		t.tv_usec = (int)(d*1e6+0.5);
+	    }
+	    else if ((t.tv_usec = (int)(-d*1e6+0.5)) > 0) {
+		t.tv_usec = 1000000 - t.tv_usec;
+		f -= 1;
+	    }
 	    t.tv_sec = (time_t)f;
 	    if (f != t.tv_sec) {
 		rb_raise(rb_eRangeError, "%f out of Time range", RFLOAT(time)->value);
 	    }
-	    t.tv_usec = (time_t)(d*1e6+0.5);
 	}
 	break;
 
@@ -759,7 +765,10 @@ make_time_t(tptr, utc_p)
     int utc_p;
 {
     time_t t;
-    struct tm *tmp, buf;
+#ifdef NEGATIVE_TIME_T
+    struct tm *tmp;
+#endif
+    struct tm buf;
     buf = *tptr;
     if (utc_p) {
 #if defined(HAVE_TIMEGM)
@@ -1924,6 +1933,7 @@ time_mdump(time)
 	rb_raise(rb_eArgError, "year too big to marshal");
 
     p = 0x1UL        << 31 | /*  1 */
+	tobj->gmt    << 30 | /*  1 */
 	tm->tm_year  << 14 | /* 16 */
 	tm->tm_mon   << 10 | /*  4 */
 	tm->tm_mday  <<  5 | /*  5 */
@@ -1982,7 +1992,7 @@ time_mload(time, str)
     time_t sec, usec;
     unsigned char *buf;
     struct tm tm;
-    int i;
+    int i, gmt;
 
     time_modify(time);
     StringValue(str);
@@ -2004,7 +2014,8 @@ time_mload(time, str)
 	usec = s;
     }
     else {
-       p &= ~(1UL<<31);
+	p &= ~(1UL<<31);
+	gmt        = (p >> 30) & 0x1;
 	tm.tm_year = (p >> 14) & 0xffff;
 	tm.tm_mon  = (p >> 10) & 0xf;
 	tm.tm_mday = (p >>  5) & 0x1f;
@@ -2020,6 +2031,7 @@ time_mload(time, str)
 
     GetTimeval(time, tobj);
     tobj->tm_got = 0;
+    tobj->gmt = gmt;
     tobj->tv.tv_sec = sec;
     tobj->tv.tv_usec = usec;
     return time;

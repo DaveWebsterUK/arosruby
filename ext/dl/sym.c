@@ -1,5 +1,5 @@
 /* -*- C -*-
- * $Id: sym.c 12835 2007-07-22 05:33:47Z nobu $
+ * $Id: sym.c 18479 2008-08-11 00:37:21Z shyouhei $
  */
 
 #include <ruby.h>
@@ -492,6 +492,7 @@ rb_dlsym_call(int argc, VALUE argv[], VALUE self)
 	      rb_raise(rb_eDLTypeError, "unexpected type of argument #%d", i);
 	    }
 	  }
+	  rb_check_safe_obj(pval);
 	  Data_Get_Struct(pval, struct ptr_data, data);
 	  ANY2P(args[i]) = DLVOIDP(data->ptr);
 	}

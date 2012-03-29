@@ -16,7 +16,9 @@ else
 	echo "Your AROS system directory is \""$aros_dir\"
         echo "**************************************************"
 
-	CC=$aros_gcc" -nix" CC_FOR_BUILD=gcc ./configure --target=i386-pc-aros --host=i386-pc-aros --build=i386-pc-linux --prefix=$aros_dir"/Development" --disable-shared LIBS="-lmui"
+	CC=$aros_gcc" -nix" CC_FOR_BUILD=gcc ./configure --target=i386-pc-aros --host=i386-pc-aros --build=i386-pc-linux --prefix=$aros_dir"/Development" --disable-shared --with-static-linked-ext
+
+# LIBS="-lmui"
 
 fi 
 

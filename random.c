@@ -2,8 +2,8 @@
 
   random.c -
 
-  $Author: knu $
-  $Date: 2008-04-14 19:52:17 +0900 (Mon, 14 Apr 2008) $
+  $Author: shyouhei $
+  $Date: 2011-12-28 21:47:15 +0900 (Wed, 28 Dec 2011) $
   created at: Fri Dec 24 16:39:21 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -189,7 +189,7 @@ rb_genrand_real(void)
 #include <fcntl.h>
 #endif
 
-static int first = 1;
+static int seed_initialized = 0;
 static VALUE saved_seed = INT2FIX(0);
 
 static VALUE
@@ -245,35 +245,31 @@ rand_init(vseed)
             len--;
         init_by_array(buf, len);
     }
-    first = 0;
     old = saved_seed;
     saved_seed = seed;
     free(buf);
     return old;
 }
 
-static VALUE
-random_seed()
+#define DEFAULT_SEED_LEN (4 * sizeof(long))
+
+static void
+fill_random_seed(ptr)
+    char *ptr;
 {
     static int n = 0;
+    unsigned long *seed;
     struct timeval tv;
     int fd;
     struct stat statbuf;
+    char *buf = (char*)ptr;
 
-    int seed_len;
-    BDIGIT *digits;
-    unsigned long *seed;
-    NEWOBJ(big, struct RBignum);
-    OBJSETUP(big, rb_cBignum, T_BIGNUM);
+    seed = (unsigned long *)buf;
 
-    seed_len = 4 * sizeof(long);
-    big->sign = 1;
-    big->len = seed_len / SIZEOF_BDIGITS + 1;
-    digits = big->digits = ALLOC_N(BDIGIT, big->len);
-    seed = (unsigned long *)big->digits;
+    memset(buf, 0, DEFAULT_SEED_LEN);
 
-    memset(digits, 0, big->len * SIZEOF_BDIGITS);
-
+//AROS
+/*
 #ifdef S_ISCHR
     if ((fd = open("/dev/urandom", O_RDONLY
 #ifdef O_NONBLOCK
@@ -287,22 +283,46 @@ random_seed()
 #endif
             )) >= 0) {
         if (fstat(fd, &statbuf) == 0 && S_ISCHR(statbuf.st_mode)) {
-            read(fd, seed, seed_len);
+            read(fd, seed, DEFAULT_SEED_LEN);
         }
         close(fd);
     }
 #endif
-
+*/
     gettimeofday(&tv, 0);
     seed[0] ^= tv.tv_usec;
     seed[1] ^= tv.tv_sec;
     seed[2] ^= getpid() ^ (n++ << 16);
     seed[3] ^= (unsigned long)&seed;
+}
+
+static VALUE
+make_seed_value(char *ptr)
+{
+    BDIGIT *digits;
+    NEWOBJ(big, struct RBignum);
+    OBJSETUP(big, rb_cBignum, T_BIGNUM);
+
+    RBIGNUM_SET_SIGN(big, 1);
+
+    digits = ALLOC_N(char, DEFAULT_SEED_LEN);
+    RBIGNUM(big)->digits = digits;
+    RBIGNUM(big)->len = DEFAULT_SEED_LEN / SIZEOF_BDIGITS;
+
+    MEMCPY(digits, ptr, char, DEFAULT_SEED_LEN);
 
     /* set leading-zero-guard if need. */
-    digits[big->len-1] = digits[big->len-2] <= 1 ? 1 : 0;
+    digits[RBIGNUM_LEN(big)-1] = digits[RBIGNUM_LEN(big)-2] <= 1 ? 1 : 0;
 
     return rb_big_norm((VALUE)big);
+}
+
+static VALUE
+random_seed(void)
+{
+    char buf[DEFAULT_SEED_LEN];
+    fill_random_seed(buf);
+    return make_seed_value(buf);
 }
 
 /*
@@ -445,8 +465,8 @@ rb_f_rand(argc, argv, obj)
     long val, max;
 
     rb_scan_args(argc, argv, "01", &vmax);
-    if (first) {
-	rand_init(random_seed());
+    if (!seed_initialized) {
+       rand_init(random_seed());
     }
     switch (TYPE(vmax)) {
       case T_FLOAT:
@@ -495,9 +515,33 @@ rb_f_rand(argc, argv, obj)
     return LONG2NUM(val);
 }
 
+static char initial_seed[DEFAULT_SEED_LEN];
+
+void
+rb_reset_random_seed()
+{
+    rand_init(random_seed());
+}
+
+void
+Init_RandomSeed(void)
+{
+    fill_random_seed(initial_seed);
+    init_by_array((unsigned long*)initial_seed, DEFAULT_SEED_LEN/sizeof(unsigned long));
+    seed_initialized = 1;
+}
+
+static void
+Init_RandomSeed2(void)
+{
+    saved_seed = make_seed_value(initial_seed);
+    memset(initial_seed, 0, DEFAULT_SEED_LEN);
+}
+
 void
 Init_Random()
 {
+    Init_RandomSeed2();
     rb_define_global_function("srand", rb_f_srand, -1);
     rb_define_global_function("rand", rb_f_rand, -1);
     rb_global_variable(&saved_seed);

@@ -236,7 +236,7 @@
 # Rails, the web application framework, uses ERB to create views.
 #
 class ERB
-  Revision = '$Date: 2008-03-24 01:27:20 +0900 (Mon, 24 Mar 2008) $' 	#'
+  Revision = '$Date: 2009-02-24 02:44:50 +0900 (Tue, 24 Feb 2009) $' 	#'
 
   # Returns revision information for the erb.rb module.
   def self.version
@@ -327,16 +327,18 @@ class ERB
       end
 
       def scan_line(line)
-        line.scan(/(.*?)(<%%|%%>|<%=|<%#|<%|%>|\n|\z)/m) do |token|
-	  next if token.empty?
-	  yield(token)
+        line.scan(/(.*?)(<%%|%%>|<%=|<%#|<%|%>|\n|\z)/m) do |tokens|
+          tokens.each do |token|
+            next if token.empty?
+            yield(token)
+          end
 	end
       end
 
       def trim_line1(line)
         line.scan(/(.*?)(<%%|%%>|<%=|<%#|<%|%>\n|%>|\n|\z)/m) do |tokens|
           tokens.each do |token|
-	  next if token.empty?
+            next if token.empty?
             if token == "%>\n"
               yield('%>')
               yield(:cr)
@@ -355,7 +357,7 @@ class ERB
             head = token unless head
             if token == "%>\n"
               yield('%>')
-              if  is_erb_stag?(head)
+              if is_erb_stag?(head)
                 yield(:cr)
               else
                 yield("\n")
@@ -369,21 +371,22 @@ class ERB
 	end
       end
 
-      ExplicitTrimRegexp = /(^[ \t]*<%-)|(-%>\n?\z)|(<%-)|(-%>)|(<%%)|(%%>)|(<%=)|(<%#)|(<%)|(%>)|(\n)/
       def explicit_trim_line(line)
-	line.split(ExplicitTrimRegexp).each do |token|
-	  next if token.empty?
-	  if @stag.nil? && /[ \t]*<%-/ =~ token
-	    yield('<%')
-	  elsif @stag && /-%>\n/ =~ token
-	    yield('%>')
-	    yield(:cr)
-	  elsif @stag && token == '-%>'
-	    yield('%>')
-	  else
-	    yield(token)
-	  end
-	end
+        line.scan(/(.*?)(^[ \t]*<%\-|<%\-|<%%|%%>|<%=|<%#|<%|-%>\n|-%>|%>|\z)/m) do |tokens|
+          tokens.each do |token|
+            next if token.empty?
+            if @stag.nil? && /[ \t]*<%-/ =~ token
+              yield('<%')
+            elsif @stag && token == "-%>\n"
+              yield('%>')
+              yield(:cr)
+            elsif @stag && token == '-%>'
+              yield('%>')
+            else
+              yield(token)
+            end
+          end
+        end
       end
 
       ERB_STAG = %w(<%= <%# <%)
@@ -422,27 +425,6 @@ class ERB
         end
       end
       Scanner.regist_scanner(SimpleScanner2, nil, false)
-
-      class PercentScanner < Scanner # :nodoc:
-	def scan
-          stag_reg = /(.*?)(^%%|^%|<%%|<%=|<%#|<%|\z)/m
-          etag_reg = /(.*?)(%%>|%>|\z)/m
-          scanner = StringScanner.new(@src)
-          while ! scanner.eos?
-	    scanner.scan(@stag ? etag_reg : stag_reg)
-            yield(scanner[1])
-
-            elem = scanner[2]
-            if elem == '%%'
-              elem = '%'
-            elsif elem == '%'
-              elem = PercentLine.new(scanner.scan(/.*?(\n|\z)/).chomp)
-            end
-            yield(elem)
-          end
-        end
-      end
-      Scanner.regist_scanner(PercentScanner, nil, true)
 
       class ExplicitScanner < Scanner # :nodoc:
 	def scan
@@ -653,7 +635,7 @@ class ERB
   #    
   #    def build
   #      b = binding
-  #      # create and run templates, filling member data variebles
+  #      # create and run templates, filling member data variables
   #      ERB.new(<<-'END_PRODUCT'.gsub(/^\s+/, ""), 0, "", "@product").result b
   #        <%= PRODUCT[:name] %>
   #        <%= PRODUCT[:desc] %>

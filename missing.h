@@ -4,7 +4,7 @@
   	      for missing timeval struct
 
   $Author: shyouhei $
-  $Date: 2007-02-13 08:01:19 +0900 (Tue, 13 Feb 2007) $
+  $Date: 2010-11-22 16:21:27 +0900 (Mon, 22 Nov 2010) $
   created at: Sat May 11 23:46:03 JST 2002
 
 ************************************************/
@@ -25,6 +25,13 @@ struct timeval {
 #  include <sys/types.h>
 #endif
 
+#if !defined(HAVE_STRUCT_TIMEZONE)
+struct timezone {
+    int tz_minuteswest;
+    int tz_dsttime;
+};
+#endif
+
 #ifndef HAVE_ACOSH
 extern double acosh _((double));
 extern double asinh _((double));
@@ -32,7 +39,7 @@ extern double atanh _((double));
 #endif
 
 #ifndef HAVE_CRYPT
-extern char *crypt _((char *, char *));
+extern char *crypt _((const char *, const char *));
 #endif
 
 #ifndef HAVE_DUP2

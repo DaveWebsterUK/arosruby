@@ -8,7 +8,7 @@
 
   $Idaemons: /home/cvs/rb/enumerator/enumerator.c,v 1.1.1.1 2001/07/15 10:12:48 knu Exp $
   $RoughId: enumerator.c,v 1.6 2003/07/27 11:03:24 nobu Exp $
-  $Id: enumerator.c 16583 2008-05-24 20:21:59Z knu $
+  $Id: enumerator.c 16794 2008-06-03 11:06:38Z knu $
 
 ************************************************/
 
@@ -55,7 +55,7 @@ enumerator_ptr(obj)
 		 "wrong argument type %s (expected Enumerable::Enumerator)",
 		 rb_obj_classname(obj));
     }
-    if (!ptr) {
+    if (!ptr || ptr->obj == Qundef) {
 	rb_raise(rb_eArgError, "uninitialized enumerator");
     }
     return ptr;
@@ -214,8 +214,13 @@ enumerator_allocate(klass)
     VALUE klass;
 {
     struct enumerator *ptr;
-    return Data_Make_Struct(klass, struct enumerator,
-			    enumerator_mark, -1, ptr);
+    VALUE enum_obj;
+
+    enum_obj = Data_Make_Struct(klass, struct enumerator,
+				enumerator_mark, -1, ptr);
+    ptr->obj = Qundef;
+
+    return enum_obj;
 }
 
 static VALUE enumerator_each_i _((VALUE, VALUE));
@@ -235,7 +240,13 @@ enumerator_init(enum_obj, obj, meth, argc, argv)
     int argc;
     VALUE *argv;
 {
-    struct enumerator *ptr = enumerator_ptr(enum_obj);
+    struct enumerator *ptr;
+
+    Data_Get_Struct(enum_obj, struct enumerator, ptr);
+
+    if (!ptr) {
+	rb_raise(rb_eArgError, "unallocated enumerator");
+    }
 
     ptr->obj  = obj;
     ptr->meth = rb_to_id(meth);
@@ -253,8 +264,7 @@ enumerator_init(enum_obj, obj, meth, argc, argv)
  *  used as an Enumerable object using the given object's given
  *  method with the given arguments.
  *
- *  Use of this method is not discouraged.  Use Kernel#enum_for()
- *  instead.
+ *  Use of this method is discouraged.  Use Kernel#enum_for() instead.
  */
 static VALUE
 enumerator_initialize(argc, argv, obj)
@@ -283,7 +293,12 @@ enumerator_init_copy(obj, orig)
     struct enumerator *ptr0, *ptr1;
 
     ptr0 = enumerator_ptr(orig);
-    ptr1 = enumerator_ptr(obj);
+
+    Data_Get_Struct(obj, struct enumerator, ptr1);
+
+    if (!ptr1) {
+	rb_raise(rb_eArgError, "unallocated enumerator");
+    }
 
     ptr1->obj  = ptr0->obj;
     ptr1->meth = ptr0->meth;

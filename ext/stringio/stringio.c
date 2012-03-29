@@ -2,8 +2,8 @@
 
   stringio.c -
 
-  $Author: knu $
-  $Date: 2008-05-27 19:07:07 +0900 (Tue, 27 May 2008) $
+  $Author: shyouhei $
+  $Date: 2010-11-24 16:38:34 +0900 (Wed, 24 Nov 2010) $
   $RoughId: stringio.c,v 1.13 2002/03/14 03:24:18 nobu Exp $
   created at: Tue Feb 19 04:10:38 JST 2002
 
@@ -269,6 +269,8 @@ strio_init(argc, argv, ptr)
 	break;
     }
     ptr->string = string;
+    ptr->pos = 0;
+    ptr->lineno = 0;
 }
 
 static VALUE
@@ -779,15 +781,24 @@ strio_ungetc(self, ch)
     int cc = NUM2INT(ch);
     long len, pos = ptr->pos;
 
-    if (cc != EOF && pos > 0) {
-	if ((len = RSTRING(ptr->string)->len) < pos-- ||
-	    (unsigned char)RSTRING(ptr->string)->ptr[pos] !=
-	    (unsigned char)cc) {
-	    strio_extend(ptr, pos, 1);
-	    RSTRING(ptr->string)->ptr[pos] = cc;
-	    OBJ_INFECT(ptr->string, self);
+    if (cc != EOF) {
+	len = RSTRING(ptr->string)->len;
+	if (pos == 0) {
+	    char *p;
+	    rb_str_resize(ptr->string, len + 1);
+	    p = RSTRING(ptr->string)->ptr;
+	    memmove(p + 1, p, len);
 	}
-	--ptr->pos;
+	else {
+	    if (len < pos-- ||
+		(unsigned char)RSTRING(ptr->string)->ptr[pos] !=
+		(unsigned char)cc) {
+		strio_extend(ptr, pos, 1);
+	    }
+	    --ptr->pos;
+	}
+	RSTRING(ptr->string)->ptr[pos] = cc;
+	OBJ_INFECT(ptr->string, self);
 	ptr->flags &= ~STRIO_EOF;
     }
     return Qnil;
@@ -922,7 +933,7 @@ strio_getline(argc, argv, ptr)
 	s = p;
 	while ((p = memchr(p, '\n', e - p)) && (p != e)) {
 	    if (*++p == '\n') {
-		e = p;
+		e = p + 1;
 		break;
 	    }
 	}
@@ -990,7 +1001,7 @@ strio_readline(argc, argv, self)
     VALUE *argv;
     VALUE self;
 {
-    VALUE line = strio_getline(argc, argv, readable(StringIO(self)));
+    VALUE line = strio_gets(argc, argv, self);
     if (NIL_P(line)) rb_eof_error();
     return line;
 }

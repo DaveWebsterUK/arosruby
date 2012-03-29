@@ -2,8 +2,8 @@
 
   process.c -
 
-  $Author: knu $
-  $Date: 2008-05-27 19:07:07 +0900 (Tue, 27 May 2008) $
+  $Author: shyouhei $
+  $Date: 2010-06-08 18:02:21 +0900 (Tue, 08 Jun 2010) $
   created at: Tue Aug 10 14:30:50 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -42,7 +42,7 @@ struct timeval rb_time_interval _((VALUE));
 #ifdef HAVE_SYS_WAIT_H
 # include <sys/wait.h>
 #endif
-#ifdef HAVE_GETPRIORITY
+#ifdef HAVE_SYS_RESOURCE_H
 # include <sys/resource.h>
 #endif
 #include "st.h"
@@ -121,7 +121,6 @@ static VALUE S_Tms;
 #ifdef __AROS__ 
 #define	RLIM_INFINITY	0x7fffffff
 #endif
-
 
 /*
  *  call-seq:
@@ -1031,9 +1030,11 @@ int
 rb_proc_exec(str)
     const char *str;
 {
+#ifndef _WIN32
     const char *s = str;
     char *ss, *t;
     char **argv, **a;
+#endif
 
     while (*str && ISSPACE(*str))
 	str++;
@@ -1096,7 +1097,9 @@ proc_spawn_v(argv, prog)
     char **argv;
     char *prog;
 {
+#if defined(__human68k__)
     char *extension;
+#endif
     int status;
 
     if (!prog)
@@ -1333,7 +1336,11 @@ rb_f_fork(obj)
     fflush(stderr);
 #endif
 
-    switch (pid = vfork()) {/* AROS - changed fork to vfork */
+    before_exec();
+    pid = vfork();
+    after_exec();
+
+    switch (pid) {
       case 0:
 #ifdef linux
 	after_exec();
@@ -1412,12 +1419,12 @@ rb_syswait(pid)
 {
     static int overriding;
 #ifdef SIGHUP
-    RETSIGTYPE (*hfunc)_((int));
+    RETSIGTYPE (*hfunc)_((int)) = 0;
 #endif
 #ifdef SIGQUIT
-    RETSIGTYPE (*qfunc)_((int));
+    RETSIGTYPE (*qfunc)_((int)) = 0;
 #endif
-    RETSIGTYPE (*ifunc)_((int));
+    RETSIGTYPE (*ifunc)_((int)) = 0;
     int status;
     int i, hooked = Qfalse;
 
@@ -1573,13 +1580,15 @@ rb_f_system(argc, argv)
 
     chfunc = signal(SIGCHLD, SIG_DFL);
   retry:
-    pid = vfork();/* AROS - changed fork to vfork */
+    before_exec();
+    pid = vfork();
     if (pid == 0) {
 	/* child process */
 	rb_thread_atfork();
 	rb_protect(proc_exec_args, (VALUE)&earg, NULL);
 	_exit(127);
     }
+    after_exec();
     if (pid < 0) {
 	if (errno == EAGAIN) {
 	    rb_thread_sleep(1);
@@ -1657,7 +1666,9 @@ rb_f_sleep(argc, argv)
 static VALUE
 proc_getpgrp()
 {
+#if defined(HAVE_GETPGRP) && defined(GETPGRP_VOID)
     int pgrp;
+#endif
 
     rb_secure(2);
 #if defined(HAVE_GETPGRP) && defined(GETPGRP_VOID)

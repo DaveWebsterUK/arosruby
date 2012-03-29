@@ -2,8 +2,8 @@
 
   object.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2009-12-14 12:53:19 +0900 (Mon, 14 Dec 2009) $
   created at: Thu Jul 15 12:01:24 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -1573,8 +1573,21 @@ rb_class_initialize(argc, argv, klass)
  *  call-seq:
  *     class.allocate()   =>   obj
  *  
- *  Allocates space for a new object of <i>class</i>'s class. The
- *  returned object must be an instance of <i>class</i>.
+ *  Allocates space for a new object of <i>class</i>'s class and does not
+ *  call initialize on the new instance. The returned object must be an
+ *  instance of <i>class</i>.
+ *  
+ *      klass = Class.new do
+ *        def initialize(*args)
+ *          @initialized = true
+ *        end
+ *      
+ *        def initialized?
+ *          @initialized || false
+ *        end
+ *      end
+ *      
+ *      klass.allocate.initialized? #=> false
  *     
  */
 
@@ -2192,7 +2205,7 @@ convert_type(val, tname, method, raise)
     ID m;
 
     m = rb_intern(method);
-    if (!rb_obj_respond_to(val, m, Qtrue)) {
+    if (!rb_respond_to(val, m)) {
 	if (raise) {
 	    rb_raise(rb_eTypeError, "can't convert %s into %s",
 		     NIL_P(val) ? "nil" :
@@ -2457,13 +2470,8 @@ rb_Float(val)
 	break;
 
       default:
-      {
-	  VALUE f = rb_convert_type(val, T_FLOAT, "Float", "to_f");
-	  if (isnan(RFLOAT(f)->value)) {
-	      rb_raise(rb_eArgError, "invalid value for Float()");
-	  }
-	  return f;
-      }
+	return rb_convert_type(val, T_FLOAT, "Float", "to_f");
+
     }
 }
 

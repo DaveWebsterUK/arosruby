@@ -188,7 +188,6 @@ class CGI
         md5.update('foobar')
         session_id = md5.hexdigest
       end
-      @new_session = true
       session_id
     end
     private :create_new_id
@@ -230,7 +229,7 @@ class CGI
     # session_path:: the path for which this session applies.  Defaults
     #                to the directory of the CGI script.
     #
-    # +option+ is also passed on to the session storage class initialiser; see
+    # +option+ is also passed on to the session storage class initializer; see
     # the documentation for each session storage class for the options
     # they support.
     #                  
@@ -256,6 +255,7 @@ class CGI
       unless session_id
 	if option['new_session']
 	  session_id = create_new_id
+      @new_session = true
 	end
       end
       unless session_id
@@ -271,6 +271,7 @@ class CGI
 	    raise ArgumentError, "session_key `%s' should be supplied"%session_key
 	  end
 	  session_id = create_new_id
+      @new_session = true
 	end
       end
       @session_id = session_id
@@ -281,7 +282,8 @@ class CGI
         unless option.fetch('new_session', true)
           raise ArgumentError, "invalid session_id `%s'"%session_id
         end
-        session_id = @session_id = create_new_id
+        session_id = @session_id = create_new_id unless session_id
+      @new_session = true
         retry
       end
       request.instance_eval do
@@ -357,7 +359,7 @@ class CGI
       # characters; automatically generated session ids observe
       # this requirement.
       # 
-      # +option+ is a hash of options for the initialiser.  The
+      # +option+ is a hash of options for the initializer.  The
       # following options are recognised:
       #
       # tmpdir:: the directory to use for storing the FileStore

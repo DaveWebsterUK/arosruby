@@ -2,8 +2,8 @@
 
   numeric.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2011-12-10 21:17:27 +0900 (Sat, 10 Dec 2011) $
   created at: Fri Aug 13 18:33:09 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -63,6 +63,8 @@
 #define DBL_EPSILON 2.2204460492503131e-16
 #endif
 
+extern double round _((double));
+
 #ifndef HAVE_ROUND
 double
 round(x)
@@ -121,7 +123,9 @@ num_coerce(x, y)
 {
     if (CLASS_OF(x) == CLASS_OF(y))
 	return rb_assoc_new(y, x);
-    return rb_assoc_new(rb_Float(y), rb_Float(x));
+    x = rb_Float(x);
+    y = rb_Float(y);
+    return rb_assoc_new(y, x);
 }
 
 static VALUE
@@ -932,6 +936,10 @@ flo_cmp(x, y)
 	break;
 
       case T_BIGNUM:
+	if (isinf(a)) {
+	    if (a > 0.0) return INT2FIX(1);
+	    else return INT2FIX(-1);
+	}
 	b = rb_big2dbl(y);
 	break;
 
@@ -1425,6 +1433,33 @@ num_truncate(num)
 }
 
 
+int ruby_float_step _((VALUE from, VALUE to, VALUE step, int excl));
+
+int
+ruby_float_step(from, to, step, excl)
+    VALUE from, to, step;
+    int excl;
+{
+    if (TYPE(from) == T_FLOAT || TYPE(to) == T_FLOAT || TYPE(step) == T_FLOAT) {
+	const double epsilon = DBL_EPSILON;
+	double beg = NUM2DBL(from);
+	double end = NUM2DBL(to);
+	double unit = NUM2DBL(step);
+	double n = (end - beg)/unit;
+	double err = (fabs(beg) + fabs(end) + fabs(end-beg)) / fabs(unit) * epsilon;
+	long i;
+
+	if (err>0.5) err=0.5;
+	n = floor(n + err);
+	if (!excl || ((long)n)*unit+beg < end) n++;
+	for (i=0; i<n; i++) {
+	    rb_yield(rb_float_new(i*unit+beg));
+	}
+	return Qtrue;
+    }
+    return Qfalse;
+}
+
 /*
  *  call-seq:
  *     num.step(limit, step ) {|i| block }     => num
@@ -1499,22 +1534,7 @@ num_step(argc, argv, from)
 	    }
 	}
     }
-    else if (TYPE(from) == T_FLOAT || TYPE(to) == T_FLOAT || TYPE(step) == T_FLOAT) {
-	const double epsilon = DBL_EPSILON;
-	double beg = NUM2DBL(from);
-	double end = NUM2DBL(to);
-	double unit = NUM2DBL(step);
-	double n = (end - beg)/unit;
-	double err = (fabs(beg) + fabs(end) + fabs(end-beg)) / fabs(unit) * epsilon;
-	long i;
-
-	if (err>0.5) err=0.5;
-	n = floor(n + err) + 1;
-	for (i=0; i<n; i++) {
-	    rb_yield(rb_float_new(i*unit+beg));
-	}
-    }
-    else {
+    else if (!ruby_float_step(from, to, step, Qfalse)) {
 	VALUE i = from;
 	ID cmp;
 
@@ -1598,11 +1618,21 @@ check_int(num)
 }
 
 static void
-check_uint(num)
+check_uint(num, sign)
     unsigned long num;
+    VALUE sign;
 {
-    if (num > UINT_MAX) {
-	rb_raise(rb_eRangeError, "integer %lu too big to convert to `unsigned int'", num);
+    static const unsigned long mask = ~(unsigned long)UINT_MAX;
+
+    if (RTEST(sign)) {
+	/* minus */
+	if ((num & mask) != mask || (num & ~mask) <= INT_MAX + 1UL)
+	    rb_raise(rb_eRangeError, "integer %ld too small to convert to `unsigned int'", num);
+    }
+    else {
+	/* plus */
+	if ((num & mask) != 0)
+	    rb_raise(rb_eRangeError, "integer %lu too big to convert to `unsigned int'", num);
     }
 }
 
@@ -1632,9 +1662,7 @@ rb_num2uint(val)
 {
     unsigned long num = rb_num2ulong(val);
 
-    if (RTEST(rb_funcall(INT2FIX(0), '<', 1, val))) {
-	check_uint(num);
-    }
+    check_uint(num, rb_funcall(val, '<', 1, INT2FIX(0)));
     return num;
 }
 
@@ -1648,9 +1676,8 @@ rb_fix2uint(val)
         return rb_num2uint(val);
     }
     num = FIX2ULONG(val);
-    if (FIX2LONG(val) > 0) {
-	check_uint(num);
-    }
+
+    check_uint(num, rb_funcall(val, '<', 1, INT2FIX(0)));
     return num;
 }
 #else

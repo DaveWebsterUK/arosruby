@@ -3,7 +3,7 @@
  *
  *   Copyright (C) UENO Katsuhiro 2000-2003
  *
- * $Id: zlib.c 16458 2008-05-18 15:02:36Z knu $
+ * $Id: zlib.c 31714 2011-05-23 04:49:42Z shyouhei $
  */
 
 #include <ruby.h>
@@ -302,7 +302,7 @@ do_checksum(argc, argv, func)
 /*
  * call-seq: Zlib.adler32(string, adler)
  *
- * Calculates Alder-32 checksum for +string+, and returns updated value of
+ * Calculates Adler-32 checksum for +string+, and returns updated value of
  * +adler+. If +string+ is omitted, it returns the Adler-32 initial value. If
  * +adler+ is omitted, it assumes that the initial value is given to +adler+.
  *
@@ -610,7 +610,8 @@ zstream_append_input(z, src, len)
 }
 
 #define zstream_append_input2(z,v)\
-    zstream_append_input((z), RSTRING(v)->ptr, RSTRING(v)->len)
+    RB_GC_GUARD(v),\
+    zstream_append_input((z), (Bytef*)RSTRING_PTR(v), RSTRING_LEN(v))
 
 static void
 zstream_discard_input(z, len)
@@ -733,6 +734,9 @@ zstream_run(z, src, len, flush)
     }
 
     for (;;) {
+        /* VC allocates err and guard to same address.  accessing err and guard
+           in same scope prevents it. */
+        RB_GC_GUARD(guard);
 	n = z->stream.avail_out;
 	err = z->func->run(&z->stream, flush);
 	z->buf_filled += n - z->stream.avail_out;
@@ -1182,14 +1186,19 @@ static VALUE
 rb_deflate_init_copy(self, orig)
     VALUE self, orig;
 {
-    struct zstream *z1 = get_zstream(self);
-    struct zstream *z2 = get_zstream(orig);
+    struct zstream *z1, *z2;
     int err;
+
+    Data_Get_Struct(self, struct zstream, z1);
+    z2 = get_zstream(orig);
 
     err = deflateCopy(&z1->stream, &z2->stream);
     if (err != Z_OK) {
 	raise_zlib_error(err, 0);
     }
+    z1->input = NIL_P(z2->input) ? Qnil : rb_str_dup(z2->input);
+    z1->buf   = NIL_P(z2->buf)   ? Qnil : rb_str_dup(z2->buf);
+    z1->buf_filled = z2->buf_filled;
     z1->flags = z2->flags;
 
     return self;
@@ -1369,6 +1378,7 @@ rb_deflate_params(obj, v_level, v_strategy)
     level = ARG_LEVEL(v_level);
     strategy = ARG_STRATEGY(v_strategy);
 
+    zstream_run(z, (Bytef*)"", 0, Z_SYNC_FLUSH);
     err = deflateParams(&z->stream, level, strategy);
     while (err == Z_BUF_ERROR) {
 	rb_warning("deflateParams() returned Z_BUF_ERROR");
@@ -2081,7 +2091,7 @@ gzfile_check_footer(gz)
     if (gz->crc != crc) {
 	rb_raise(cCRCError, "invalid compressed data -- crc error");
     }
-    if (gz->z.stream.total_out != length) {
+    if ((gz->z.stream.total_out & 0xFFFFFFFFUL) != length) {
 	rb_raise(cLengthError, "invalid compressed data -- length error");
     }
 }
@@ -2486,7 +2496,7 @@ rb_gzfile_set_mtime(obj, mtime)
 	rb_raise(cGzError, "header is already written");
     }
 
-    if (FIXNUM_P(time)) {
+    if (FIXNUM_P(mtime)) {
 	gz->mtime = FIX2INT(mtime);
     }
     else {
@@ -3371,7 +3381,7 @@ void Init_zlib()
     rb_define_singleton_method(cDeflate, "deflate", rb_deflate_s_deflate, -1);
     rb_define_alloc_func(cDeflate, rb_deflate_s_allocate);
     rb_define_method(cDeflate, "initialize", rb_deflate_initialize, -1);
-    rb_define_method(cDeflate, "initialize_copy", rb_deflate_init_copy, 0);
+    rb_define_method(cDeflate, "initialize_copy", rb_deflate_init_copy, 1);
     rb_define_method(cDeflate, "deflate", rb_deflate_deflate, -1);
     rb_define_method(cDeflate, "<<", rb_deflate_addstr, 1);
     rb_define_method(cDeflate, "flush", rb_deflate_flush, -1);

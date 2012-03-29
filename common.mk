@@ -5,7 +5,7 @@ dll: $(LIBRUBY_SO)
 RUBYLIB       = -
 RUBYOPT       = -
 
-SPEC_GIT_BASE = git://github.com/brixen
+SPEC_GIT_BASE = git://github.com/rubyspec
 MSPEC_GIT_URL = $(SPEC_GIT_BASE)/mspec.git
 RUBYSPEC_GIT_URL = $(SPEC_GIT_BASE)/rubyspec.git
 
@@ -64,7 +64,8 @@ SCRIPT_ARGS   =	--dest-dir="$(DESTDIR)" \
 		--extout="$(EXTOUT)" \
 		--mflags="$(MFLAGS)" \
 		--make-flags="$(MAKEFLAGS)"
-EXTMK_ARGS    =	$(SCRIPT_ARGS) --extension $(EXTS) --extstatic $(EXTSTATIC) --
+EXTMK_ARGS    =	$(SCRIPT_ARGS) --extension $(EXTS) --extstatic $(EXTSTATIC) \
+		--make-flags="MINIRUBY='$(MINIRUBY)'" --
 INSTRUBY_ARGS =	$(SCRIPT_ARGS) \
 		--data-mode=$(INSTALL_DATA_MODE) \
 		--prog-mode=$(INSTALL_PROG_MODE) \
@@ -311,7 +312,7 @@ extconf:
 	$(MINIRUBY) -run -e mkdir -- -p "$(EXTCONFDIR)"
 	$(RUNRUBY) -C "$(EXTCONFDIR)" $(EXTCONF) $(EXTCONFARGS)
 
-$(RBCONFIG): $(srcdir)/mkconfig.rb config.status $(PREP)
+$(RBCONFIG): $(srcdir)/mkconfig.rb config.status $(srcdir)/version.h $(PREP)
 	@$(MINIRUBY) $(srcdir)/mkconfig.rb -timestamp=$@ \
 		-install_name=$(RUBY_INSTALL_NAME) \
 		-so_name=$(RUBY_SO_NAME) rbconfig.rb
@@ -362,7 +363,8 @@ array.$(OBJEXT): {$(VPATH)}array.c {$(VPATH)}ruby.h config.h \
   {$(VPATH)}defines.h {$(VPATH)}intern.h {$(VPATH)}missing.h \
   {$(VPATH)}util.h {$(VPATH)}st.h
 bignum.$(OBJEXT): {$(VPATH)}bignum.c {$(VPATH)}ruby.h config.h \
-  {$(VPATH)}defines.h {$(VPATH)}intern.h {$(VPATH)}missing.h
+  {$(VPATH)}defines.h {$(VPATH)}intern.h {$(VPATH)}missing.h \
+  {$(VPATH)}rubysig.h
 class.$(OBJEXT): {$(VPATH)}class.c {$(VPATH)}ruby.h config.h \
   {$(VPATH)}defines.h {$(VPATH)}intern.h {$(VPATH)}missing.h \
   {$(VPATH)}rubysig.h {$(VPATH)}node.h {$(VPATH)}st.h

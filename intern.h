@@ -2,8 +2,8 @@
 
   intern.h -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2011-05-23 13:49:40 +0900 (Mon, 23 May 2011) $
   created at: Thu Jun 10 14:22:17 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -83,6 +83,8 @@ unsigned LONG_LONG rb_big2ull _((VALUE));
 #endif  /* HAVE_LONG_LONG */
 void rb_quad_pack _((char*,VALUE));
 VALUE rb_quad_unpack _((const char*,int));
+void rb_big_pack(VALUE val, unsigned long *buf, long num_longs);
+VALUE rb_big_unpack(unsigned long *buf, long num_longs);
 VALUE rb_dbl2big _((double));
 double rb_big2dbl _((VALUE));
 VALUE rb_big_plus _((VALUE, VALUE));
@@ -251,10 +253,12 @@ VALUE rb_file_directory_p _((VALUE,VALUE));
 /* gc.c */
 NORETURN(void rb_memerror __((void)));
 int ruby_stack_check _((void));
-int ruby_stack_length _((VALUE**));
+size_t ruby_stack_length _((VALUE**));
+int rb_during_gc _((void));
 char *rb_source_filename _((const char*));
 void rb_gc_mark_locations _((VALUE*, VALUE*));
 void rb_mark_tbl _((struct st_table*));
+void rb_mark_set _((struct st_table*));
 void rb_mark_hash _((struct st_table*));
 void rb_gc_mark_maybe _((VALUE));
 void rb_gc_mark _((VALUE));
@@ -277,7 +281,7 @@ VALUE rb_hash_lookup _((VALUE, VALUE));
 VALUE rb_hash_aset _((VALUE, VALUE, VALUE));
 VALUE rb_hash_delete_if _((VALUE));
 VALUE rb_hash_delete _((VALUE,VALUE));
-int rb_path_check _((char*));
+int rb_path_check _((const char*));
 int rb_env_path_tainted _((void));
 /* io.c */
 #define rb_defout rb_stdout
@@ -376,6 +380,7 @@ VALUE rb_length_by_each _((VALUE));
 /* random.c */
 unsigned long rb_genrand_int32(void);
 double rb_genrand_real(void);
+void rb_reset_random_seed(void);
 /* re.c */
 int rb_memcmp _((const void*,const void*,long));
 int rb_memcicmp _((const void*,const void*,long));
@@ -418,6 +423,7 @@ const char *ruby_signal_name _((int));
 void ruby_default_signal _((int));
 /* sprintf.c */
 VALUE rb_f_sprintf _((int, VALUE*));
+VALUE rb_str_format _((int, VALUE*, VALUE));
 /* string.c */
 VALUE rb_str_new _((const char*, long));
 VALUE rb_str_new2 _((const char*));

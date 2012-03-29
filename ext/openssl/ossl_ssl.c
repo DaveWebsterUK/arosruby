@@ -1,5 +1,5 @@
 /*
- * $Id: ossl_ssl.c 16193 2008-04-25 06:51:21Z knu $
+ * $Id: ossl_ssl.c 34486 2012-02-08 06:09:40Z nahi $
  * 'OpenSSL for Ruby' project
  * Copyright (C) 2000-2002  GOTOU Yuuzou <gotoyuzo@notwork.org>
  * Copyright (C) 2001-2002  Michal Rokos <m.rokos@sh.cvut.cz>
@@ -101,9 +101,12 @@ struct {
     OSSL_SSL_METHOD_ENTRY(TLSv1),
     OSSL_SSL_METHOD_ENTRY(TLSv1_server),
     OSSL_SSL_METHOD_ENTRY(TLSv1_client),
+#if defined(HAVE_SSLV2_METHOD) && defined(HAVE_SSLV2_SERVER_METHOD) && \
+        defined(HAVE_SSLV2_CLIENT_METHOD)	
     OSSL_SSL_METHOD_ENTRY(SSLv2),
     OSSL_SSL_METHOD_ENTRY(SSLv2_server),
     OSSL_SSL_METHOD_ENTRY(SSLv2_client),
+#endif
     OSSL_SSL_METHOD_ENTRY(SSLv3),
     OSSL_SSL_METHOD_ENTRY(SSLv3_server),
     OSSL_SSL_METHOD_ENTRY(SSLv3_client),
@@ -137,7 +140,6 @@ ossl_sslctx_s_alloc(VALUE klass)
         ossl_raise(eSSLError, "SSL_CTX_new:");
     }
     SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE);
-    SSL_CTX_set_options(ctx, SSL_OP_ALL);
     return Data_Wrap_Struct(klass, 0, ossl_sslctx_free, ctx);
 }
 
@@ -557,7 +559,11 @@ ossl_sslctx_setup(VALUE self)
     if(!NIL_P(val)) SSL_CTX_set_verify_depth(ctx, NUM2LONG(val));
 
     val = ossl_sslctx_get_options(self);
-    if(!NIL_P(val)) SSL_CTX_set_options(ctx, NUM2LONG(val));
+    if(!NIL_P(val)) {
+    	SSL_CTX_set_options(ctx, NUM2LONG(val));
+    } else {
+	SSL_CTX_set_options(ctx, SSL_OP_ALL);
+    }
     rb_obj_freeze(self);
 
     val = ossl_sslctx_get_sess_id_ctx(self);
@@ -829,7 +835,7 @@ ossl_sslctx_flush_sessions(int argc, VALUE *argv, VALUE self)
         rb_raise(rb_eArgError, "arg must be Time or nil");
     }
 
-    SSL_CTX_flush_sessions(ctx, tm);
+    SSL_CTX_flush_sessions(ctx, (long)tm);
 
     return self;
 }
@@ -1196,10 +1202,10 @@ ossl_ssl_get_peer_cert_chain(VALUE self)
     }
     chain = SSL_get_peer_cert_chain(ssl);
     if(!chain) return Qnil;
-    num = sk_num(chain);
+    num = sk_X509_num(chain);
     ary = rb_ary_new2(num);
     for (i = 0; i < num; i++){
-	cert = (X509*)sk_value(chain, i);
+	cert = sk_X509_value(chain, i);
 	rb_ary_push(ary, ossl_x509_new(cert));
     }
 
@@ -1438,18 +1444,20 @@ Init_ossl_ssl()
     ossl_ssl_def_const(VERIFY_PEER);
     ossl_ssl_def_const(VERIFY_FAIL_IF_NO_PEER_CERT);
     ossl_ssl_def_const(VERIFY_CLIENT_ONCE);
-    /* Not introduce constants included in OP_ALL such as...
-     * ossl_ssl_def_const(OP_MICROSOFT_SESS_ID_BUG);
-     * ossl_ssl_def_const(OP_NETSCAPE_CHALLENGE_BUG);
-     * ossl_ssl_def_const(OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG);
-     * ossl_ssl_def_const(OP_SSLREF2_REUSE_CERT_TYPE_BUG);
-     * ossl_ssl_def_const(OP_MICROSOFT_BIG_SSLV3_BUFFER);
-     * ossl_ssl_def_const(OP_MSIE_SSLV2_RSA_PADDING);
-     * ossl_ssl_def_const(OP_SSLEAY_080_CLIENT_DH_BUG);
-     * ossl_ssl_def_const(OP_TLS_D5_BUG);
-     * ossl_ssl_def_const(OP_TLS_BLOCK_PADDING_BUG);
-     * ossl_ssl_def_const(OP_DONT_INSERT_EMPTY_FRAGMENTS);
+    /* Introduce constants included in OP_ALL.  These constants are mostly for
+     * unset some bits in OP_ALL such as;
+     *   ctx.options = OP_ALL & ~OP_DONT_INSERT_EMPTY_FRAGMENTS
      */
+    ossl_ssl_def_const(OP_MICROSOFT_SESS_ID_BUG);
+    ossl_ssl_def_const(OP_NETSCAPE_CHALLENGE_BUG);
+    ossl_ssl_def_const(OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG);
+    ossl_ssl_def_const(OP_SSLREF2_REUSE_CERT_TYPE_BUG);
+    ossl_ssl_def_const(OP_MICROSOFT_BIG_SSLV3_BUFFER);
+    ossl_ssl_def_const(OP_MSIE_SSLV2_RSA_PADDING);
+    ossl_ssl_def_const(OP_SSLEAY_080_CLIENT_DH_BUG);
+    ossl_ssl_def_const(OP_TLS_D5_BUG);
+    ossl_ssl_def_const(OP_TLS_BLOCK_PADDING_BUG);
+    ossl_ssl_def_const(OP_DONT_INSERT_EMPTY_FRAGMENTS);
     ossl_ssl_def_const(OP_ALL);
 #if defined(SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION)
     ossl_ssl_def_const(OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION);
@@ -1466,6 +1474,9 @@ Init_ossl_ssl()
     ossl_ssl_def_const(OP_NO_SSLv2);
     ossl_ssl_def_const(OP_NO_SSLv3);
     ossl_ssl_def_const(OP_NO_TLSv1);
+#if defined(SSL_OP_NO_TICKET)
+    ossl_ssl_def_const(OP_NO_TICKET);
+#endif
     ossl_ssl_def_const(OP_PKCS1_CHECK_1);
     ossl_ssl_def_const(OP_PKCS1_CHECK_2);
     ossl_ssl_def_const(OP_NETSCAPE_CA_DN_BUG);

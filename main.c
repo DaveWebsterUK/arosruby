@@ -70,8 +70,7 @@ main(argc, argv, envp)
     int argc;
     char **argv, **envp;
 {
-
-
+	
 #ifdef __AROS__ 
 
     int size = __env_get_environ (NULL, 0);
@@ -93,8 +92,8 @@ main(argc, argv, envp)
         return d; 
     }
 
-#endif
-
+#endif	
+	
 #ifdef _WIN32
     NtInitialize(&argc, &argv);
 #endif

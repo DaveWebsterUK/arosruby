@@ -152,9 +152,9 @@ module Net
     end
 
     def open_socket(host, port)
-      if defined? SOCKSsocket and ENV["SOCKS_SERVER"]
+      if defined? SOCKSSocket and ENV["SOCKS_SERVER"]
 	@passive = true
-	return SOCKSsocket.open(host, port)
+	return SOCKSSocket.open(host, port)
       else
 	return TCPSocket.open(host, port)
       end
@@ -278,12 +278,9 @@ module Net
     def sendport(host, port)
       af = (@sock.peeraddr)[0]
       if af == "AF_INET"
-	hbytes = host.split(".")
-	pbytes = [port / 256, port % 256]
-	bytes = hbytes + pbytes
-	cmd = "PORT " + bytes.join(",")
+	cmd = "PORT " + (host.split(".") + port.divmod(256)).join(",")
       elsif af == "AF_INET6"
-	cmd = "EPRT |2|" + host + "|" + sprintf("%d", port) + "|"
+	cmd = sprintf("EPRT |2|%s|%d|", host, port)
       else
 	raise FTPProtoError, host
       end
@@ -349,9 +346,9 @@ module Net
     private :transfercmd
     
     def getaddress
-      thishost = Socket.gethostname
+      thishost = Socket.gethostname rescue ""
       if not thishost.index(".")
-	thishost = Socket.gethostbyname(thishost)[0]
+        thishost = Socket.gethostbyname(thishost)[0] rescue ""
       end
       if ENV.has_key?("LOGNAME")
 	realuser = ENV["LOGNAME"]
@@ -381,9 +378,11 @@ module Net
       synchronize do
 	resp = sendcmd('USER ' + user)
 	if resp[0] == ?3
+          raise FTPReplyError, resp if passwd.nil?
 	  resp = sendcmd('PASS ' + passwd)
 	end
 	if resp[0] == ?3
+          raise FTPReplyError, resp if acct.nil?
 	  resp = sendcmd('ACCT ' + acct)
 	end
       end
@@ -671,9 +670,9 @@ module Net
 	begin
 	  voidcmd("CDUP")
 	  return
-	rescue FTPPermError
-	  if $![0, 3] != "500"
-	    raise FTPPermError, $!
+	rescue FTPPermError => e
+	  if e.message[0, 3] != "500"
+	    raise e
 	  end
 	end
       end

@@ -3,7 +3,7 @@
   signal.c -
 
   $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Date: 2008-06-06 19:39:57 +0900 (Fri, 06 Jun 2008) $
   created at: Tue Dec 20 10:13:44 JST 1994
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -26,8 +26,6 @@
 #else
 #define USE_TRAP_MASK 0
 #endif
-
-
 
 #ifndef NSIG
 #  ifdef __AROS__ 
@@ -693,11 +691,13 @@ struct trap_arg {
     VALUE sig, cmd;
 };
 
+#if USE_TRAP_MASK
 # ifdef HAVE_SIGPROCMASK
 static sigset_t trap_last_mask;
 # else
 static int trap_last_mask;
 # endif
+#endif
 
 static RETSIGTYPE sigexit _((int));
 static RETSIGTYPE
@@ -999,6 +999,7 @@ install_nativethread_sighandler(signum, handler)
 #endif
 #endif
 
+#if defined(SIGCLD) || defined(SIGCHLD)
 static void
 init_sigchld(sig)
     int sig;
@@ -1040,6 +1041,7 @@ init_sigchld(sig)
     trap_last_mask = mask;
 #endif
 }
+#endif
 
 /*
  * Many operating systems allow signals to be sent to running

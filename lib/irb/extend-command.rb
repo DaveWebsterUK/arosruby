@@ -1,8 +1,8 @@
 #
 #   irb/extend-command.rb - irb extend command 
 #   	$Release Version: 0.9.5$
-#   	$Revision: 11708 $
-#   	$Date: 2007-02-13 08:01:19 +0900 (Tue, 13 Feb 2007) $
+#   	$Revision: 25814 $
+#   	$Date: 2009-11-17 15:51:29 +0900 (Tue, 17 Nov 2009) $
 #   	by Keiju ISHITSUKA(keiju@ruby-lang.org)
 #
 # --
@@ -112,7 +112,7 @@ module IRB
       end
     end
 
-    # aliases = [commans_alias, flag], ...
+    # aliases = [commands_alias, flag], ...
     def self.def_extend_command(cmd_name, cmd_class, load_file = nil, *aliases)
       case cmd_class
       when Symbol
@@ -126,9 +126,14 @@ module IRB
 	eval %[
 	  def #{cmd_name}(*opts, &b)
 	    require "#{load_file}"
+	    arity = ExtendCommand::#{cmd_class}.instance_method(:execute).arity
+	    args = (1..arity.abs).map {|i| "arg" + i.to_s }
+	    args << "*opts" if arity < 0
+	    args << "&block"
+	    args = args.join(", ")
 	    eval %[
-	      def #{cmd_name}(*opts, &b)
-		ExtendCommand::#{cmd_class}.execute(irb_context, *opts, &b)
+	      def #{cmd_name}(\#{args})
+		ExtendCommand::#{cmd_class}.execute(irb_context, \#{args})
 	      end
 	    ]
 	    send :#{cmd_name}, *opts, &b

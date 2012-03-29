@@ -2,8 +2,8 @@
 
   file.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2010-11-22 16:21:56 +0900 (Mon, 22 Nov 2010) $
   created at: Mon Nov 15 12:24:34 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -66,6 +66,10 @@ char *strrchr _((const char*,const char));
 
 #ifdef HAVE_SYS_MKDEV_H
 #include <sys/mkdev.h>
+#endif
+
+#if defined(HAVE_FCNTL_H)
+#include <fcntl.h>
 #endif
 
 #if !defined HAVE_LSTAT && !defined lstat
@@ -288,7 +292,6 @@ rb_stat_dev_minor(self)
 #endif
 }
 
-
 /*
  *  call-seq:
  *     stat.ino   => fixnum
@@ -353,7 +356,6 @@ rb_stat_nlink(self)
     return UINT2NUM(get_stat(self)->st_nlink);
 }
 
-
 /*
  *  call-seq:
  *     stat.uid    => fixnum
@@ -387,7 +389,6 @@ rb_stat_gid(self)
 {
     return UINT2NUM(get_stat(self)->st_gid);
 }
-
 
 /*
  *  call-seq:
@@ -517,7 +518,6 @@ rb_stat_blocks(self)
     return Qnil;
 #endif
 }
-
 
 /*
  *  call-seq:
@@ -784,7 +784,6 @@ rb_file_s_lstat(klass, fname)
 #endif
 }
 
-
 /*
  *  call-seq:
  *     file.lstat   =>  stat
@@ -913,7 +912,6 @@ eaccess(path, mode)
  *  class. (Note that this is not done by inclusion: the interpreter cheats).
  *     
  */
-
 
 /*
  * call-seq:
@@ -1103,7 +1101,6 @@ test_c(obj, fname)
     return Qfalse;
 }
 
-
 /*
  * call-seq:
  *    File.exist?(file_name)    =>  true or false
@@ -1155,7 +1152,6 @@ test_R(obj, fname)
     if (access(StringValueCStr(fname), R_OK) < 0) return Qfalse;
     return Qtrue;
 }
-
 
 /*
  * call-seq:
@@ -1934,7 +1930,6 @@ lchown_internal(path, argp)
 	rb_sys_fail(path);
 }
 
-
 /*
  *  call-seq:
  *     file.lchown(owner_int, group_int, file_name,..) => integer
@@ -2320,6 +2315,10 @@ rb_file_s_umask(argc, argv)
 #define USE_NTFS 0
 #endif
 
+#ifdef DOSISH_DRIVE_LETTER
+#include <ctype.h>
+#endif
+
 #if USE_NTFS
 #define istrailinggabage(x) ((x) == '.' || (x) == ' ')
 #else
@@ -2531,8 +2530,9 @@ file_expand_path(fname, dname, result)
     tainted = OBJ_TAINTED(fname);
 
     if (s[0] == '~') {
+	long userlen = 0;
 	if (isdirsep(s[1]) || s[1] == '\0') {
-	    char *dir = getenv("HOME");
+	    const char *dir = getenv("HOME");
 
 	    if (!dir) {
 		rb_raise(rb_eArgError, "couldn't find HOME environment -- expanding `%s'", s);
@@ -2558,9 +2558,10 @@ file_expand_path(fname, dname, result)
 	    s++;
 #endif
 	    s = nextdirsep(b = s);
-	    BUFCHECK(bdiff + (s-b) >= buflen);
-	    memcpy(p, b, s-b);
-	    p += s-b;
+	    userlen = s - b;
+	    BUFCHECK(bdiff + userlen >= buflen);
+	    memcpy(p, b, userlen);
+	    p += userlen;
 	    *p = '\0';
 #ifdef HAVE_PWD_H
 	    pwPtr = getpwnam(buf);
@@ -2573,7 +2574,17 @@ file_expand_path(fname, dname, result)
 	    strcpy(buf, pwPtr->pw_dir);
 	    p = buf + strlen(pwPtr->pw_dir);
 	    endpwent();
+#else
+	    rb_raise(rb_eArgError, "can't find user %s", buf);
 #endif
+	}
+	if (!is_absolute_path(RSTRING_PTR(result))) {
+	    if (userlen) {
+		rb_raise(rb_eArgError, "non-absolute home of %.*s", userlen, s);
+	    }
+	    else {
+		rb_raise(rb_eArgError, "non-absolute home");
+	    }
 	}
     }
 #ifdef DOSISH_DRIVE_LETTER
@@ -2742,57 +2753,54 @@ file_expand_path(fname, dname, result)
 
 #if USE_NTFS
     *p = '\0';
-    if (1 &&
-#ifdef __CYGWIN__
-	!(buf[0] == '/' && !buf[1]) &&
-#endif
-	!strpbrk(b = buf, "*?")) {
+    if ((s = strrdirsep(b = buf)) != 0 && !strpbrk(s, "*?")) {
 	size_t len;
 	WIN32_FIND_DATA wfd;
 #ifdef __CYGWIN__
 	int lnk_added = 0, is_symlink = 0;
 	struct stat st;
-	char w32buf[MAXPATHLEN], sep = 0;
-	p = 0;
+	char w32buf[MAXPATHLEN];
+	p = (char *)s;
 	if (lstat(buf, &st) == 0 && S_ISLNK(st.st_mode)) {
 	    is_symlink = 1;
-	    p = strrdirsep(buf);
-	    if (!p) p = skipprefix(buf);
-	    if (p) {
-		sep = *p;
-		*p = '\0';
-	    }
+	    *p = '\0';
 	}
-	if (cygwin_conv_to_win32_path(buf, w32buf) == 0) {
+	if (cygwin_conv_to_win32_path((*buf ? buf : "/"), w32buf) == 0) {
 	    b = w32buf;
 	}
-	if (p) *p = sep;
-	else p = buf;
 	if (is_symlink && b == w32buf) {
+	    *p = '\\';
+	    strlcat(w32buf, p, sizeof(w32buf));
 	    len = strlen(p);
 	    if (len > 4 && strcasecmp(p + len - 4, ".lnk") != 0) {
 		lnk_added = 1;
 		strlcat(w32buf, ".lnk", sizeof(w32buf));
 	    }
 	}
+	*p = '/';
 #endif
 	HANDLE h = FindFirstFile(b, &wfd);
 	if (h != INVALID_HANDLE_VALUE) {
 	    FindClose(h);
-	    p = strrdirsep(buf);
 	    len = strlen(wfd.cFileName);
 #ifdef __CYGWIN__
 	    if (lnk_added && len > 4 &&
 		strcasecmp(wfd.cFileName + len - 4, ".lnk") == 0) {
 		wfd.cFileName[len -= 4] = '\0';
 	    }
+#else
+	    p = (char *)s;
 #endif
-	    if (!p) p = buf;
 	    ++p;
 	    BUFCHECK(bdiff + len >= buflen);
 	    memcpy(p, wfd.cFileName, len + 1);
 	    p += len;
 	}
+#ifdef __CYGWIN__
+	else {
+	    p += strlen(p);
+	}
+#endif
     }
 #endif
 
@@ -2885,24 +2893,17 @@ rmext(p, l1, e)
  *     File.basename("/home/gumby/work/ruby.rb", ".rb")   #=> "ruby"
  */
 
-static VALUE
-rb_file_s_basename(argc, argv)
-    int argc;
-    VALUE *argv;
+const char *
+ruby_find_basename(name, baselen, alllen)
+    const char *name;
+    long *baselen, *alllen;
 {
-    VALUE fname, fext, basename;
-    char *name, *p;
+    const char *p, *q, *e;
 #if defined DOSISH_DRIVE_LETTER || defined DOSISH_UNC
-    char *root;
+    const char *root;
 #endif
-    int f, n;
+    long f = 0, n = -1;
 
-    if (rb_scan_args(argc, argv, "11", &fname, &fext) == 2) {
-	StringValue(fext);
-    }
-    StringValue(fname);
-    if (RSTRING(fname)->len == 0 || !*(name = RSTRING(fname)->ptr))
-	return fname;
     name = skipprefix(name);
 #if defined DOSISH_DRIVE_LETTER || defined DOSISH_UNC
     root = name;
@@ -2941,11 +2942,59 @@ rb_file_s_basename(argc, argv)
 #else
 	n = chompdirsep(p) - p;
 #endif
+	for (q = p; q - p < n && *q == '.'; q++);
+	for (e = 0; q - p < n; q = CharNext(q)) {
+	    if (*q == '.') e = q;
+	}
+	if (e) f = e - p;
+	else f = n;
+    }
+
+    if (baselen)
+	*baselen = f;
+    if (alllen)
+	*alllen = n;
+    return p;
+}
+
+/*
+ *  call-seq:
+ *     File.basename(file_name [, suffix] ) -> base_name
+ *
+ *  Returns the last component of the filename given in <i>file_name</i>,
+ *  which must be formed using forward slashes (``<code>/</code>'')
+ *  regardless of the separator used on the local file system. If
+ *  <i>suffix</i> is given and present at the end of <i>file_name</i>,
+ *  it is removed.
+ *
+ *     File.basename("/home/gumby/work/ruby.rb")          #=> "ruby.rb"
+ *     File.basename("/home/gumby/work/ruby.rb", ".rb")   #=> "ruby"
+ */
+
+static VALUE
+rb_file_s_basename(argc, argv)
+    int argc;
+    VALUE *argv;
+{
+    VALUE fname, fext, basename;
+    const char *name, *p;
+    long f, n;
+
+    if (rb_scan_args(argc, argv, "11", &fname, &fext) == 2) {
+	StringValue(fext);
+    }
+    StringValue(fname);
+    if (RSTRING_LEN(fname) == 0 || !*(name = RSTRING_PTR(fname)))
+	return fname;
+
+    p = ruby_find_basename(name, &f, &n);
+    if (n >= 0) {
 	if (NIL_P(fext) || !(f = rmext(p, n, StringValueCStr(fext)))) {
 	    f = n;
 	}
 	if (f == RSTRING_LEN(fname)) return fname;
     }
+
     basename = rb_str_new(p, f);
     OBJ_INFECT(basename, fname);
     return basename;
@@ -3003,32 +3052,29 @@ rb_file_s_dirname(klass, fname)
 }
 
 /*
- *  call-seq:
- *     File.extname(path) -> string
- *  
- *  Returns the extension (the portion of file name in <i>path</i>
- *  after the period).
- *     
- *     File.extname("test.rb")         #=> ".rb"
- *     File.extname("a/b/d/test.rb")   #=> ".rb"
- *     File.extname("test")            #=> ""
- *     File.extname(".profile")        #=> ""
- *     
+ * accept a String, and return the pointer of the extension.
+ * if len is passed, set the length of extension to it.
+ * returned pointer is in ``name'' or NULL.
+ *                 returns   *len
+ *   no dot        NULL      0
+ *   dotfile       top       0
+ *   end with dot  dot       1
+ *   .ext          dot       len of .ext
+ *   .ext:stream   dot       len of .ext without :stream (NT only)
+ *
  */
-
-static VALUE
-rb_file_s_extname(klass, fname)
-    VALUE klass, fname;
+const char *
+ruby_find_extname(name, len)
+    const char *name;
+    long *len;
 {
-    const char *name, *p, *e;
-    VALUE extname;
+    const char *p, *e;
 
-    name = StringValueCStr(fname);
     p = strrdirsep(name);	/* get the last path component */
     if (!p)
 	p = name;
     else
-	name = ++p;
+	do name = ++p; while (isdirsep(*p));
 
     e = 0;
     while (*p) {
@@ -3043,7 +3089,7 @@ rb_file_s_extname(klass, fname)
 		p = last;
 		break;
 	    }
-	    e = dot;
+	    if (*last == '.' || dot > last) e = dot;
 	    continue;
 #else
 	    e = p;	  /* get the last dot of the last component */
@@ -3058,9 +3104,46 @@ rb_file_s_extname(klass, fname)
 	    break;
 	p = CharNext(p);
     }
-    if (!e || e == name || e+1 == p)	/* no dot, or the only dot is first or end? */
+
+    if (len) {
+	/* no dot, or the only dot is first or end? */
+	if (!e || e == name)
+	    *len = 0;
+	else if (e+1 == p)
+	    *len = 1;
+	else
+	    *len = p - e;
+    }
+    return e;
+}
+
+/*
+ *  call-seq:
+ *     File.extname(path) -> string
+ *
+ *  Returns the extension (the portion of file name in <i>path</i>
+ *  after the period).
+ *
+ *     File.extname("test.rb")         #=> ".rb"
+ *     File.extname("a/b/d/test.rb")   #=> ".rb"
+ *     File.extname("test")            #=> ""
+ *     File.extname(".profile")        #=> ""
+ *
+ */
+
+static VALUE
+rb_file_s_extname(klass, fname)
+    VALUE klass, fname;
+{
+    const char *name, *e;
+    long len;
+    VALUE extname;
+
+    name = StringValueCStr(fname);
+    e = ruby_find_extname(name, &len);
+    if (len <= 1)
 	return rb_str_new(0, 0);
-    extname = rb_str_new(e, p - e);	/* keep the dot, too! */
+    extname = rb_str_new(e, len);	/* keep the dot, too! */
     OBJ_INFECT(extname, fname);
     return extname;
 }
@@ -3103,7 +3186,7 @@ rb_file_join(ary, sep)
     long len, i;
     int taint = 0;
     VALUE result, tmp;
-    char *name, *tail;
+    const char *name, *tail;
 
     if (RARRAY(ary)->len == 0) return rb_str_new(0, 0);
     if (OBJ_TAINTED(ary)) taint = 1;
@@ -3128,8 +3211,8 @@ rb_file_join(ary, sep)
 	  case T_STRING:
 	    break;
 	  case T_ARRAY:
-	    if (rb_inspecting_p(tmp)) {
-		tmp = rb_str_new2("[...]");
+	    if (tmp == ary || rb_inspecting_p(tmp)) {
+		rb_raise(rb_eArgError, "recursive array");
 	    }
 	    else {
 		VALUE args[2];
@@ -3629,7 +3712,6 @@ rb_f_test(argc, argv)
 }
 
 
-
 /*
  *  Document-class: File::Stat
  *
@@ -3947,8 +4029,6 @@ rb_stat_r(obj)
     return Qtrue;
 }
 
-
-
 /*
  *  call-seq:
  *     stat.readable_real? -> true or false
@@ -4097,7 +4177,6 @@ rb_stat_x(obj)
  *  the process.
  */
 
-
 static VALUE
 rb_stat_X(obj)
     VALUE obj;
@@ -4160,7 +4239,6 @@ rb_stat_z(obj)
     if (get_stat(obj)->st_size == 0) return Qtrue;
     return Qfalse;
 }
-
 
 /*
  *  call-seq:
@@ -4288,7 +4366,7 @@ path_check_0(fpath, execpath)
      int execpath;
 {
     struct stat st;
-    char *p0 = StringValueCStr(fpath);
+    const char *p0 = StringValueCStr(fpath);
     char *p = 0, *s;
 
     if (!is_absolute_path(p0)) {
@@ -4327,7 +4405,7 @@ path_check_0(fpath, execpath)
 
 static int
 fpath_check(path)
-    char *path;
+    const char *path;
 {
 #if ENABLE_PATH_CHECK
     return path_check_0(rb_str_new2(path), Qfalse);
@@ -4338,10 +4416,10 @@ fpath_check(path)
 
 int
 rb_path_check(path)
-    char *path;
+    const char *path;
 {
 #if ENABLE_PATH_CHECK
-    char *p0, *p, *pend;
+    const char *p0, *p, *pend;
     const char sep = PATH_SEP_CHAR;
 
     if (!path) return 1;
@@ -4376,15 +4454,21 @@ is_macos_native_path(path)
 
 static int
 file_load_ok(file)
-    char *file;
+    const char *file;
 {
-    FILE *f;
-
-    if (!file) return 0;
-    f = fopen(file, "r");
-    if (f == NULL) return 0;
-    fclose(f);
-    return 1;
+    int ret = 1;
+    int fd = open(file, O_RDONLY);
+    if (fd == -1) return 0;
+#if !defined DOSISH
+    {
+	struct stat st;
+	if (fstat(fd, &st) || !S_ISREG(st.st_mode)) {
+	    ret = 0;
+	}
+    }
+#endif
+    (void)close(fd);
+    return ret;
 }
 
 extern VALUE rb_load_path;
@@ -4394,8 +4478,8 @@ rb_find_file_ext(filep, ext)
     VALUE *filep;
     const char * const *ext;
 {
-    char *path, *found;
-    char *f = RSTRING(*filep)->ptr;
+    const char *path, *found;
+    const char *f = RSTRING(*filep)->ptr;
     VALUE fname;
     long i, j;
 
@@ -4450,8 +4534,8 @@ rb_find_file(path)
     VALUE path;
 {
     VALUE tmp;
-    char *f = StringValueCStr(path);
-    char *lpath;
+    const char *f = StringValueCStr(path);
+    const char *lpath;
 
     if (f[0] == '~') {
 	path = rb_file_expand_path(path, Qnil);

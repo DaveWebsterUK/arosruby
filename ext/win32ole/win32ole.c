@@ -12,12 +12,25 @@
  */
 
 /*
-  $Date: 2007-11-17 14:25:09 +0900 (Sat, 17 Nov 2007) $
   modified for win32ole (ruby) by Masaki.Suketa <masaki.suketa@nifty.ne.jp>
  */
 
 #include "ruby.h"
 #include "st.h"
+
+#define GNUC_OLDER_3_4_4 \
+    ((__GNUC__ < 3) || \
+     ((__GNUC__ <= 3) && (__GNUC_MINOR__ < 4)) || \
+     ((__GNUC__ <= 3) && (__GNUC_MINOR__ <= 4) && (__GNUC_PATCHLEVEL__ <= 4)))
+
+#if (defined(__GNUC__)) && (GNUC_OLDER_3_4_4) 
+#ifndef NONAMELESSUNION
+#define NONAMELESSUNION 1
+#endif
+#endif
+
+#include <ctype.h>
+
 #include <windows.h>
 #include <ocidl.h>
 #include <olectl.h>
@@ -29,7 +42,7 @@
 #include <varargs.h>
 #define va_init_list(a,b) va_start(a)
 #endif
-
+#include <objidl.h>
 
 #define DOUT fprintf(stderr,"[%d]\n",__LINE__)
 #define DOUTS(x) fprintf(stderr,"[%d]:" #x "=%s\n",__LINE__,x)
@@ -37,13 +50,13 @@
 #define DOUTI(x) fprintf(stderr, "[%ld]:" #x "=%d\n",__LINE__,x)
 #define DOUTD(x) fprintf(stderr, "[%d]:" #x "=%f\n",__LINE__,x)
 
-#if defined NONAMELESSUNION && __GNUC__
+#if (defined(__GNUC__)) && (GNUC_OLDER_3_4_4) 
 #define V_UNION1(X, Y) ((X)->u.Y)
 #else
 #define V_UNION1(X, Y) ((X)->Y)
 #endif
 
-#if defined NONAMELESSUNION && __GNUC__
+#if (defined(__GNUC__)) && (GNUC_OLDER_3_4_4) 
 #undef V_UNION
 #define V_UNION(X,Y) ((X)->n1.n2.n3.Y)
 
@@ -79,7 +92,7 @@
 
 #define WC2VSTR(x) ole_wc2vstr((x), TRUE)
 
-#define WIN32OLE_VERSION "0.7.4"
+#define WIN32OLE_VERSION "0.7.9"
 
 typedef HRESULT (STDAPICALLTYPE FNCOCREATEINSTANCEEX)
     (REFCLSID, IUnknown*, DWORD, COSERVERINFO*, DWORD, MULTI_QI*);
@@ -157,6 +170,9 @@ static VALUE com_hash;
 static IDispatchVtbl com_vtbl;
 static UINT  cWIN32OLE_cp = CP_ACP;
 static VARTYPE g_nil_to = VT_ERROR;
+static IMessageFilterVtbl message_filter;
+static IMessageFilter imessage_filter = { &message_filter };
+static IMessageFilter* previous_filter;
 
 struct oledata {
     IDispatch *pDispatch;
@@ -203,6 +219,101 @@ static char *ole_wc2mb(LPWSTR);
 static VALUE ole_variant2val(VARIANT*);
 static void ole_val2variant(VALUE, VARIANT*);
   
+static HRESULT (STDMETHODCALLTYPE mf_QueryInterface)(
+    IMessageFilter __RPC_FAR * This,
+    /* [in] */ REFIID riid,
+    /* [iid_is][out] */ void __RPC_FAR *__RPC_FAR *ppvObject)
+{
+    if (MEMCMP(riid, &IID_IUnknown, GUID, 1) == 0
+        || MEMCMP(riid, &IID_IMessageFilter, GUID, 1) == 0)
+    {
+        *ppvObject = &message_filter;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG (STDMETHODCALLTYPE mf_AddRef)( 
+    IMessageFilter __RPC_FAR * This)
+{
+    return 1;
+}
+        
+static ULONG (STDMETHODCALLTYPE mf_Release)( 
+    IMessageFilter __RPC_FAR * This)
+{
+    return 1;
+}
+
+static DWORD (STDMETHODCALLTYPE mf_HandleInComingCall)(
+    IMessageFilter __RPC_FAR * pThis,
+    DWORD dwCallType,      //Type of incoming call
+    HTASK threadIDCaller,  //Task handle calling this task
+    DWORD dwTickCount,     //Elapsed tick count
+    LPINTERFACEINFO lpInterfaceInfo //Pointer to INTERFACEINFO structure
+    )
+{
+#ifdef DEBUG_MESSAGEFILTER
+    printf("incoming %08X, %08X, %d\n", dwCallType, threadIDCaller, dwTickCount);
+    fflush(stdout);
+#endif
+    switch (dwCallType)
+    {
+    case CALLTYPE_ASYNC:
+    case CALLTYPE_TOPLEVEL_CALLPENDING:
+    case CALLTYPE_ASYNC_CALLPENDING:
+        if (rb_during_gc()) {
+            return SERVERCALL_RETRYLATER;
+        }
+        break;
+    default:
+        break;
+    }
+    if (previous_filter) {
+        return previous_filter->lpVtbl->HandleInComingCall(previous_filter,
+                                                   dwCallType,
+                                                   threadIDCaller,
+                                                   dwTickCount,
+                                                   lpInterfaceInfo);
+    }
+    return SERVERCALL_ISHANDLED;
+}
+
+static DWORD (STDMETHODCALLTYPE mf_RetryRejectedCall)(
+    IMessageFilter* pThis,
+    HTASK threadIDCallee,  //Server task handle
+    DWORD dwTickCount,     //Elapsed tick count
+    DWORD dwRejectType     //Returned rejection message
+    )
+{
+    if (previous_filter) {
+        return previous_filter->lpVtbl->RetryRejectedCall(previous_filter,
+                                                  threadIDCallee,
+                                                  dwTickCount,
+                                                  dwRejectType);
+    }
+    return 1000;
+}
+
+static DWORD (STDMETHODCALLTYPE mf_MessagePending)(
+    IMessageFilter* pThis,
+    HTASK threadIDCallee,  //Called applications task handle
+    DWORD dwTickCount,     //Elapsed tick count
+    DWORD dwPendingType    //Call type
+    )
+{
+    if (rb_during_gc()) {
+        return PENDINGMSG_WAITNOPROCESS;
+    }
+    if (previous_filter) {
+        return previous_filter->lpVtbl->MessagePending(previous_filter,
+                                               threadIDCallee,
+                                               dwTickCount,
+                                               dwPendingType);
+    }
+    return PENDINGMSG_WAITNOPROCESS;
+}
+    
 typedef struct _Win32OLEIDispatch
 {
     IDispatch dispatch;
@@ -459,7 +570,7 @@ date2time_str(date)
     double date;
 {
     int y, m, d, hh, mm, ss;
-    char szTime[20];
+    char szTime[40];
     double2time(date, &y, &m, &d, &hh, &mm, &ss);
     sprintf(szTime,
             "%4.4d/%02.2d/%02.2d %02.2d:%02.2d:%02.2d",
@@ -522,6 +633,15 @@ ole_hresult2msg(hr)
     return msg;
 }
 
+static void
+ole_freeexceptinfo(pExInfo)
+    EXCEPINFO *pExInfo;
+{
+    SysFreeString(pExInfo->bstrDescription);
+    SysFreeString(pExInfo->bstrSource);
+    SysFreeString(pExInfo->bstrHelpFile);
+}
+
 static VALUE
 ole_excepinfo2msg(pExInfo)
     EXCEPINFO *pExInfo;
@@ -561,9 +681,7 @@ ole_excepinfo2msg(pExInfo)
     }
     if(pSource) free(pSource);
     if(pDescription) free(pDescription);
-    SysFreeString(pExInfo->bstrDescription);
-    SysFreeString(pExInfo->bstrSource);
-    SysFreeString(pExInfo->bstrHelpFile);
+    ole_freeexceptinfo(pExInfo);
     return error_msg;
 }
 
@@ -618,6 +736,11 @@ ole_initialize()
         /*
         atexit((void (*)(void))ole_uninitialize);
         */
+        hr = CoRegisterMessageFilter(&imessage_filter, &previous_filter);
+        if(FAILED(hr)) {
+            previous_filter = NULL;
+            ole_raise(hr, rb_eRuntimeError, "fail: install OLE MessageFilter");
+        }
     }
 }
 
@@ -712,6 +835,71 @@ ole_ary_m_entry(val, pid)
     return obj;
 }
 
+static VALUE
+is_all_index_under(pid, pub, dim)
+    long *pid; 
+    long *pub; 
+    long dim; 
+{
+    long i = 0;
+    for (i = 0; i < dim; i++) {
+        if (pid[i] > pub[i]) {
+            return Qfalse;
+        }
+    }
+    return Qtrue;
+}
+
+static long
+dimension(val) 
+    VALUE val;
+{
+    long dim = 0;
+    long dim1 = 0;
+    long len = 0;
+    long i = 0;
+    if (TYPE(val) == T_ARRAY) {
+        len = RARRAY(val)->len;
+        for (i = 0; i < len; i++) {
+            dim1 = dimension(rb_ary_entry(val, i));
+            if (dim < dim1) {
+                dim = dim1;
+            }
+        }
+        dim += 1;
+    }
+    return dim;
+}
+
+static long 
+ary_len_of_dim(ary, dim) 
+    VALUE ary;
+    long dim;
+{
+    long ary_len = 0;
+    long ary_len1 = 0;
+    long len = 0;
+    long i = 0;
+    VALUE val;
+    if (dim == 0) {
+        if (TYPE(ary) == T_ARRAY) {
+            ary_len = RARRAY(ary)->len;
+        }
+    } else {
+        if (TYPE(ary) == T_ARRAY) {
+            len = RARRAY(ary)->len;
+            for (i = 0; i < len; i++) {
+                val = rb_ary_entry(ary, i);
+                ary_len1 = ary_len_of_dim(val, dim-1);
+                if (ary_len < ary_len1) {
+                    ary_len = ary_len1;
+                }
+            }
+        }
+    }
+    return ary_len;
+}
+
 static void
 ole_set_safe_array(n, psa, pid, pub, val, dim)
     long n;
@@ -722,22 +910,96 @@ ole_set_safe_array(n, psa, pid, pub, val, dim)
     long dim;
 {
     VALUE val1;
+    HRESULT hr = S_OK;
     VARIANT var;
-    VariantInit(&var);
-    if(n < 0) return;
-    if(n == dim) {
+    VOID *p = NULL;
+    long i = n;
+    while(i >= 0) {
         val1 = ole_ary_m_entry(val, pid);
+        VariantInit(&var);
         ole_val2variant(val1, &var);
-        SafeArrayPutElement(psa, pid, &var);
+        if (is_all_index_under(pid, pub, dim) == Qtrue) {
+            if ((V_VT(&var) == VT_DISPATCH && V_DISPATCH(&var) == NULL) ||
+                (V_VT(&var) == VT_UNKNOWN && V_UNKNOWN(&var) == NULL)) {
+                rb_raise(eWIN32OLE_RUNTIME_ERROR, "element of array does not have IDispatch or IUnknown Interface");
+            }
+            hr = SafeArrayPutElement(psa, pid, &var);
+        }
+        if (FAILED(hr)) {
+            ole_raise(hr, rb_eRuntimeError, "failed to SafeArrayPutElement");
+        }
+        pid[i] += 1;
+        if (pid[i] > pub[i]) {
+            pid[i] = 0;
+            i -= 1;
+        } else {
+            i = dim - 1;
+        }
     }
-    pid[n] += 1;
-    if (pid[n] < pub[n]) {
-        ole_set_safe_array(dim, psa, pid, pub, val, dim);
+}
+
+static HRESULT
+ole_val_ary2variant_ary(val, var, vt)
+    VALUE val;
+    VARIANT *var;
+    VARTYPE vt;
+{
+    long dim = 0;
+    int  i = 0;
+    HRESULT hr = S_OK;
+
+    SAFEARRAYBOUND *psab = NULL;
+    SAFEARRAY *psa = NULL;
+    long      *pub, *pid;
+
+    Check_Type(val, T_ARRAY);
+
+    dim = dimension(val);
+
+    psab = ALLOC_N(SAFEARRAYBOUND, dim);
+    pub  = ALLOC_N(long, dim);
+    pid  = ALLOC_N(long, dim);
+
+    if(!psab || !pub || !pid) {
+        if(pub) free(pub);
+        if(psab) free(psab);
+        if(pid) free(pid);
+        rb_raise(rb_eRuntimeError, "memory allocation error");
+    }
+
+    for (i = 0; i < dim; i++) {
+        psab[i].cElements = ary_len_of_dim(val, i);
+        psab[i].lLbound = 0;
+        pub[i] = psab[i].cElements - 1;
+        pid[i] = 0;
+    }
+    /* Create and fill VARIANT array */
+    if ((vt & ~VT_BYREF) == VT_ARRAY) {
+        vt = (vt | VT_VARIANT);
+    }
+    psa = SafeArrayCreate(VT_VARIANT, dim, psab);
+    if (psa == NULL)
+        hr = E_OUTOFMEMORY;
+    else
+        hr = SafeArrayLock(psa);
+    if (SUCCEEDED(hr)) {
+        ole_set_safe_array(dim-1, psa, pid, pub, val, dim);
+        hr = SafeArrayUnlock(psa);
+    }
+
+    if(pub) free(pub);
+    if(psab) free(psab);
+    if(pid) free(pid);
+
+    if (SUCCEEDED(hr)) {
+        V_VT(var) = vt;
+        V_ARRAY(var) = psa;
     }
     else {
-        pid[n] = 0;
-        ole_set_safe_array(n-1, psa, pid, pub, val, dim);
+        if (psa != NULL)
+            SafeArrayDestroy(psa);
     }
+    return hr;
 }
 
 static void
@@ -760,63 +1022,8 @@ ole_val2variant(val, var)
     }
     switch (TYPE(val)) {
     case T_ARRAY:
-    {
-        VALUE val1;
-        long dim = 0;
-        int  i = 0;
-
-        HRESULT hr;
-        SAFEARRAYBOUND *psab;
-        SAFEARRAY *psa;
-        long      *pub, *pid;
-
-        val1 = val;
-        while(TYPE(val1) == T_ARRAY) {
-            val1 = rb_ary_entry(val1, 0);
-            dim += 1;
-        }
-        psab = ALLOC_N(SAFEARRAYBOUND, dim);
-        pub  = ALLOC_N(long, dim);
-        pid  = ALLOC_N(long, dim);
-
-        if(!psab || !pub || !pid) {
-            if(pub) free(pub);
-            if(psab) free(psab);
-            if(pid) free(pid);
-            rb_raise(rb_eRuntimeError, "memory allocation error");
-        }
-        val1 = val;
-        i = 0;
-        while(TYPE(val1) == T_ARRAY) {
-            psab[i].cElements = RARRAY(val1)->len;
-            psab[i].lLbound = 0;
-            pub[i] = psab[i].cElements;
-            pid[i] = 0;
-            i ++;
-            val1 = rb_ary_entry(val1, 0);
-        }
-        /* Create and fill VARIANT array */
-        psa = SafeArrayCreate(VT_VARIANT, dim, psab);
-        if (psa == NULL)
-            hr = E_OUTOFMEMORY;
-        else
-            hr = SafeArrayLock(psa);
-        if (SUCCEEDED(hr)) {
-            ole_set_safe_array(dim-1, psa, pid, pub, val, dim-1);
-            hr = SafeArrayUnlock(psa);
-        }
-        if(pub) free(pub);
-        if(psab) free(psab);
-        if(pid) free(pid);
-
-        if (SUCCEEDED(hr)) {
-            V_VT(var) = VT_VARIANT | VT_ARRAY;
-            V_ARRAY(var) = psa;
-        }
-        else if (psa != NULL)
-            SafeArrayDestroy(psa);
+        ole_val_ary2variant_ary(val, var, VT_VARIANT|VT_ARRAY);
         break;
-    }
     case T_STRING:
         V_VT(var) = VT_BSTR;
         V_BSTR(var) = ole_mb2wc(StringValuePtr(val), -1);
@@ -2109,6 +2316,9 @@ ole_invoke(argc, argv, self, wFlags)
                 param = rb_ary_entry(paramS, i-cNamedArgs);
                 ole_val2variant(param, &op.dp.rgvarg[n]);
             }
+            if (hr == DISP_E_EXCEPTION) {
+                ole_freeexceptinfo(&excepinfo);
+            }
             memset(&excepinfo, 0, sizeof(EXCEPINFO));
             VariantInit(&result);
             hr = pole->pDispatch->lpVtbl->Invoke(pole->pDispatch, DispID, 
@@ -2121,6 +2331,9 @@ ole_invoke(argc, argv, self, wFlags)
              * hResult == DISP_E_EXCEPTION. this only happens on
              * functions whose DISPID > 0x8000 */
             if ((hr == DISP_E_EXCEPTION || hr == DISP_E_MEMBERNOTFOUND) && DispID > 0x8000) {
+                if (hr == DISP_E_EXCEPTION) {
+                    ole_freeexceptinfo(&excepinfo);
+                }
                 memset(&excepinfo, 0, sizeof(EXCEPINFO));
                 hr = pole->pDispatch->lpVtbl->Invoke(pole->pDispatch, DispID, 
                         &IID_NULL, lcid, wFlags,
@@ -2139,6 +2352,9 @@ ole_invoke(argc, argv, self, wFlags)
                     n = op.dp.cArgs - i + cNamedArgs - 1;
                     param = rb_ary_entry(paramS, i-cNamedArgs);
                     ole_val2variant2(param, &op.dp.rgvarg[n]);
+                }
+                if (hr == DISP_E_EXCEPTION) {
+                    ole_freeexceptinfo(&excepinfo);
                 }
                 memset(&excepinfo, 0, sizeof(EXCEPINFO));
                 VariantInit(&result);
@@ -5911,7 +6127,6 @@ find_default_source(ole, piid, ppTypeInfo)
 
     OLE_RELEASE_TYPEATTR(pTypeInfo, pTypeAttr);
     OLE_RELEASE(pTypeInfo);
-
     /* Now that would be a bad surprise, if we didn't find it, wouldn't it? */
     if (!*ppTypeInfo) {
         if (SUCCEEDED(hr))
@@ -6007,6 +6222,7 @@ fev_initialize(argc, argv, self)
         rb_raise(rb_eTypeError, "1st parameter must be WIN32OLE object");
     }
 
+    pTypeInfo = NULL;
     if(TYPE(itf) != T_NIL) {
         if (ruby_safe_level > 0 && OBJ_TAINTED(itf)) {
             rb_raise(rb_eSecurityError, "Insecure Event Creation - %s",
@@ -6167,6 +6383,14 @@ Init_win32ole()
     com_vtbl.GetTypeInfo = GetTypeInfo;
     com_vtbl.GetIDsOfNames = GetIDsOfNames;
     com_vtbl.Invoke = Invoke;
+
+    message_filter.QueryInterface = mf_QueryInterface;
+    message_filter.AddRef = mf_AddRef;
+    message_filter.Release = mf_Release;
+    message_filter.HandleInComingCall = mf_HandleInComingCall;
+    message_filter.RetryRejectedCall = mf_RetryRejectedCall;
+    message_filter.MessagePending = mf_MessagePending;
+
     com_hash = Data_Wrap_Struct(rb_cData, rb_mark_hash, st_free_table, st_init_numtable());
 
     cWIN32OLE = rb_define_class("WIN32OLE", rb_cObject);

@@ -2,8 +2,8 @@
 
   array.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:58:25 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2009-02-05 08:55:33 +0900 (Thu, 05 Feb 2009) $
   created at: Fri Aug  6 09:46:12 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -20,6 +20,7 @@ VALUE rb_cArray;
 static ID id_cmp;
 
 #define ARY_DEFAULT_SIZE 16
+#define ARY_MAX_SIZE (LONG_MAX / sizeof(VALUE))
 
 void
 rb_mem_clear(mem, size)
@@ -120,7 +121,7 @@ ary_new(klass, len)
     if (len < 0) {
 	rb_raise(rb_eArgError, "negative array size (or size too big)");
     }
-    if (len > 0 && len * sizeof(VALUE) <= len) {
+    if (len > ARY_MAX_SIZE) {
 	rb_raise(rb_eArgError, "array size too big");
     }
     if (len == 0) len++;
@@ -314,7 +315,7 @@ rb_ary_initialize(argc, argv, ary)
     if (len < 0) {
 	rb_raise(rb_eArgError, "negative array size");
     }
-    if (len > 0 && len * (long)sizeof(VALUE) <= len) {
+    if (len > ARY_MAX_SIZE) {
 	rb_raise(rb_eArgError, "array size too big");
     }
     if (len > RARRAY(ary)->aux.capa) {
@@ -379,6 +380,9 @@ rb_ary_store(ary, idx, val)
 		    idx - RARRAY(ary)->len);
 	}
     }
+    else if (idx >= ARY_MAX_SIZE) {
+	rb_raise(rb_eIndexError, "index %ld too big", idx);
+    }
 
     rb_ary_modify(ary);
     if (idx >= RARRAY(ary)->aux.capa) {
@@ -387,10 +391,10 @@ rb_ary_store(ary, idx, val)
 	if (new_capa < ARY_DEFAULT_SIZE) {
 	    new_capa = ARY_DEFAULT_SIZE;
 	}
-	new_capa += idx;
-	if (new_capa * (long)sizeof(VALUE) <= new_capa) {
-	    rb_raise(rb_eArgError, "index too big");
+	if (new_capa >= ARY_MAX_SIZE - idx) {
+	    new_capa = (ARY_MAX_SIZE - idx) / 2;
 	}
+	new_capa += idx;
 	REALLOC_N(RARRAY(ary)->ptr, VALUE, new_capa);
 	RARRAY(ary)->aux.capa = new_capa;
     }
@@ -1090,6 +1094,9 @@ rb_ary_splice(ary, beg, len, rpl)
     rb_ary_modify(ary);
 
     if (beg >= RARRAY(ary)->len) {
+	if (beg > ARY_MAX_SIZE - rlen) {
+	    rb_raise(rb_eIndexError, "index %ld too big", beg);
+	}
 	len = beg + rlen;
 	if (len >= RARRAY(ary)->aux.capa) {
 	    REALLOC_N(RARRAY(ary)->ptr, VALUE, len);
@@ -1398,7 +1405,7 @@ rb_ary_join(ary, sep)
 	  case T_STRING:
 	    break;
 	  case T_ARRAY:
-	    if (rb_inspecting_p(tmp)) {
+	    if (tmp == ary || rb_inspecting_p(tmp)) {
 		tmp = rb_str_new2("[...]");
 	    }
 	    else {
@@ -2409,10 +2416,13 @@ rb_ary_fill(argc, argv, ary)
 	break;
     }
     rb_ary_modify(ary);
-    end = beg + len;
-    if (end < 0) {
+    if (len < 0) {
+        return ary;
+    }
+    if (beg >= ARY_MAX_SIZE || len > ARY_MAX_SIZE - beg) {
 	rb_raise(rb_eArgError, "argument too big");
     }
+    end = beg + len;
     if (end > RARRAY(ary)->len) {
 	if (end >= RARRAY(ary)->aux.capa) {
 	    REALLOC_N(RARRAY(ary)->ptr, VALUE, end);
@@ -2522,7 +2532,7 @@ rb_ary_times(ary, times)
     if (len < 0) {
 	rb_raise(rb_eArgError, "negative argument");
     }
-    if (LONG_MAX/len < RARRAY(ary)->len) {
+    if (ARY_MAX_SIZE/len < RARRAY(ary)->len) {
 	rb_raise(rb_eArgError, "argument too big");
     }
     len *= RARRAY(ary)->len;

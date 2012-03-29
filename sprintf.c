@@ -2,8 +2,8 @@
 
   sprintf.c -
 
-  $Author: knu $
-  $Date: 2008-05-19 14:44:47 +0900 (Mon, 19 May 2008) $
+  $Author: shyouhei $
+  $Date: 2008-06-20 08:12:46 +0900 (Fri, 20 Jun 2008) $
   created at: Fri Oct 15 10:39:26 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -249,7 +249,15 @@ rb_f_sprintf(argc, argv)
     int argc;
     VALUE *argv;
 {
+    return rb_str_format(argc - 1, argv + 1, GETNTHARG(0));
+}
+
+VALUE
+rb_str_format(argc, argv, fmt)
+    int argc;
+    VALUE *argv;
     VALUE fmt;
+{
     const char *p, *end;
     char *buf;
     int blen, bsiz;
@@ -278,7 +286,8 @@ rb_f_sprintf(argc, argv)
 	rb_raise(rb_eArgError, "flag after precision"); \
     }
 
-    fmt = GETNTHARG(0);
+    ++argc;
+    --argv;
     if (OBJ_TAINTED(fmt)) tainted = 1;
     StringValue(fmt);
     fmt = rb_str_new4(fmt);
@@ -718,7 +727,7 @@ rb_f_sprintf(argc, argv)
 		fval = RFLOAT(rb_Float(val))->value;
 #if defined(_WIN32) && !defined(__BORLANDC__)
 		if (isnan(fval) || isinf(fval)) {
-		    char *expr;
+		    const char *expr;
 
 		    if  (isnan(fval)) {
 			expr = "NaN";

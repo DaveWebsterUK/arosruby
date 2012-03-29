@@ -2,8 +2,8 @@
 
   gc.c -
 
-  $Author: knu $
-  $Date: 2008-05-22 02:27:56 +0900 (Thu, 22 May 2008) $
+  $Author: shyouhei $
+  $Date: 2009-12-24 17:28:08 +0900 (Thu, 24 Dec 2009) $
   created at: Tue Oct  5 09:44:46 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -78,16 +78,22 @@ static void garbage_collect();
 
 int ruby_gc_stress = 0;
 
+NORETURN(void rb_exc_jump _((VALUE)));
+
 void
 rb_memerror()
 {
-    static int recurse = 0;
+    rb_thread_t th = rb_curr_thread;
 
-    if (!nomem_error || (recurse > 0 && rb_safe_level() < 4)) {
+    if (!nomem_error ||
+	(rb_thread_raised_p(th, RAISED_NOMEMORY) && rb_safe_level() < 4)) {
 	fprintf(stderr, "[FATAL] failed to allocate memory\n");
 	exit(1);
     }
-    recurse++;
+    if (rb_thread_raised_p(th, RAISED_NOMEMORY)) {
+	rb_exc_jump(nomem_error);
+    }
+    rb_thread_raised_set(th, RAISED_NOMEMORY);
     rb_exc_raise(nomem_error);
 }
 
@@ -136,9 +142,8 @@ ruby_xmalloc(size)
 	rb_raise(rb_eNoMemError, "negative allocation size (or too big)");
     }
     if (size == 0) size = 1;
-    malloc_increase += size;
 
-    if (ruby_gc_stress || malloc_increase > malloc_limit) {
+    if (ruby_gc_stress || (malloc_increase+size) > malloc_limit) {
 	garbage_collect();
     }
     RUBY_CRITICAL(mem = malloc(size));
@@ -149,6 +154,7 @@ ruby_xmalloc(size)
 	    rb_memerror();
 	}
     }
+    malloc_increase += size;
 
     return mem;
 }
@@ -177,7 +183,6 @@ ruby_xrealloc(ptr, size)
     }
     if (!ptr) return xmalloc(size);
     if (size == 0) size = 1;
-    malloc_increase += size;
     if (ruby_gc_stress) garbage_collect();
     RUBY_CRITICAL(mem = realloc(ptr, size));
     if (!mem) {
@@ -187,6 +192,7 @@ ruby_xrealloc(ptr, size)
 	    rb_memerror();
         }
     }
+    malloc_increase += size;
 
     return mem;
 }
@@ -413,6 +419,12 @@ add_heap()
 }
 #define RANY(o) ((RVALUE*)(o))
 
+int 
+rb_during_gc()
+{
+    return during_gc;
+}
+
 VALUE
 rb_newobj()
 {
@@ -468,7 +480,7 @@ unsigned int _stacksize = 262144;
 # define STACK_LEVEL_MAX (_stacksize - 4096)
 # undef HAVE_GETRLIMIT
 #elif defined(HAVE_GETRLIMIT) || defined(_WIN32)
-static unsigned int STACK_LEVEL_MAX = 655300;
+static size_t STACK_LEVEL_MAX = 655300;
 #else
 # define STACK_LEVEL_MAX 655300
 #endif
@@ -527,7 +539,7 @@ stack_grow_direction(addr)
     (ret) = (STACK_LENGTH > STACK_LEVEL_MAX + GC_WATER_MARK);\
 } while (0)
 
-int
+size_t
 ruby_stack_length(p)
     VALUE **p;
 {
@@ -709,6 +721,31 @@ rb_mark_tbl(tbl)
     st_table *tbl;
 {
     mark_tbl(tbl, 0);
+}
+
+static int
+mark_key(key, value, lev)
+    VALUE key, value;
+    int lev;
+{
+    gc_mark(key, lev);
+    return ST_CONTINUE;
+}
+
+static void
+mark_set(tbl, lev)
+    st_table *tbl;
+    int lev;
+{
+    if (!tbl) return;
+    st_foreach(tbl, mark_key, lev);
+}
+
+void
+rb_mark_set(tbl)
+    st_table *tbl;
+{
+    mark_set(tbl, 0);
 }
 
 static int
@@ -1040,7 +1077,16 @@ gc_mark_children(ptr, lev)
     }
 }
 
-static void obj_free _((VALUE));
+static int obj_free _((VALUE));
+
+static inline void
+add_freelist(p)
+    RVALUE *p;
+{
+    p->as.free.flags = 0;
+    p->as.free.next = freelist;
+    freelist = p;
+}
 
 static void
 finalize_list(p)
@@ -1050,9 +1096,7 @@ finalize_list(p)
 	RVALUE *tmp = p->as.free.next;
 	run_final((VALUE)p);
 	if (!FL_TEST(p, FL_SINGLETON)) { /* not freeing page */
-	    p->as.free.flags = 0;
-	    p->as.free.next = freelist;
-	    freelist = p;
+	    add_freelist(p);
 	}
 	p = tmp;
     }
@@ -1076,6 +1120,8 @@ free_unused_heaps()
 	}
     }
 }
+
+#define T_DEFERRED 0x3a
 
 void rb_gc_abort_threads(void);
 
@@ -1120,26 +1166,28 @@ gc_sweep()
 	int n = 0;
 	RVALUE *free = freelist;
 	RVALUE *final = final_list;
+	int deferred;
 
 	p = heaps[i].slot; pend = p + heaps[i].limit;
 	while (p < pend) {
 	    if (!(p->as.basic.flags & FL_MARK)) {
-		if (p->as.basic.flags) {
-		    obj_free((VALUE)p);
-		}
-		if (need_call_final && FL_TEST(p, FL_FINALIZE)) {
-		    p->as.free.flags = FL_MARK; /* remain marked */
+		if (p->as.basic.flags &&
+		    ((deferred = obj_free((VALUE)p)) ||
+		     ((FL_TEST(p, FL_FINALIZE)) && need_call_final))) {
+		    if (!deferred) {
+			p->as.free.flags = T_DEFERRED;
+			RDATA(p)->dfree = 0;
+		    }
+		    p->as.free.flags |= FL_MARK;
 		    p->as.free.next = final_list;
 		    final_list = p;
 		}
 		else {
-		    p->as.free.flags = 0;
-		    p->as.free.next = freelist;
-		    freelist = p;
+		    add_freelist(p);
 		}
 		n++;
 	    }
-	    else if (RBASIC(p)->flags == FL_MARK) {
+	    else if (BUILTIN_TYPE(p) == T_DEFERRED) {
 		/* objects to be finalized */
 		/* do nothing remain marked */
 	    }
@@ -1175,6 +1223,15 @@ gc_sweep()
     /* clear finalization list */
     if (final_list) {
 	deferred_final_list = final_list;
+	if (!freelist && !rb_thread_critical) {
+	    rb_gc_finalize_deferred();
+	}
+	else {
+	    rb_thread_pending = 1;
+	}
+	if (!freelist) {
+	    add_heap();
+	}
 	return;
     }
     free_unused_heaps();
@@ -1184,16 +1241,21 @@ void
 rb_gc_force_recycle(p)
     VALUE p;
 {
-    RANY(p)->as.free.flags = 0;
-    RANY(p)->as.free.next = freelist;
-    freelist = RANY(p);
+    add_freelist(RANY(p));
 }
 
-static void
+static inline void
+make_deferred(p)
+    RVALUE *p;
+{
+    p->as.basic.flags = (p->as.basic.flags & ~T_MASK) | T_DEFERRED;
+}
+
+static int
 obj_free(obj)
     VALUE obj;
 {
-    switch (RANY(obj)->as.basic.flags & T_MASK) {
+    switch (BUILTIN_TYPE(obj)) {
       case T_NIL:
       case T_FIXNUM:
       case T_TRUE:
@@ -1206,7 +1268,7 @@ obj_free(obj)
 	rb_free_generic_ivar((VALUE)obj);
     }
 
-    switch (RANY(obj)->as.basic.flags & T_MASK) {
+    switch (BUILTIN_TYPE(obj)) {
       case T_OBJECT:
 	if (RANY(obj)->as.object.iv_tbl) {
 	    st_free_table(RANY(obj)->as.object.iv_tbl);
@@ -1249,7 +1311,8 @@ obj_free(obj)
 		RUBY_CRITICAL(free(DATA_PTR(obj)));
 	    }
 	    else if (RANY(obj)->as.data.dfree) {
-		(*RANY(obj)->as.data.dfree)(DATA_PTR(obj));
+		make_deferred(RANY(obj));
+		return 1;
 	    }
 	}
 	break;
@@ -1261,8 +1324,11 @@ obj_free(obj)
 	break;
       case T_FILE:
 	if (RANY(obj)->as.file.fptr) {
-	    rb_io_fptr_finalize(RANY(obj)->as.file.fptr);
-	    RUBY_CRITICAL(free(RANY(obj)->as.file.fptr));
+	    struct rb_io_t *fptr = RANY(obj)->as.file.fptr;
+	    make_deferred(RANY(obj));
+	    RDATA(obj)->dfree = (void (*)(void*))rb_io_fptr_finalize;
+	    RDATA(obj)->data = fptr;
+	    return 1;
 	}
 	break;
       case T_ICLASS:
@@ -1290,7 +1356,7 @@ obj_free(obj)
 	    RUBY_CRITICAL(free(RANY(obj)->as.node.u1.node));
 	    break;
 	}
-	return;			/* no need to free iv_tbl */
+	break;			/* no need to free iv_tbl */
 
       case T_SCOPE:
 	if (RANY(obj)->as.scope.local_vars &&
@@ -1298,7 +1364,7 @@ obj_free(obj)
 	    VALUE *vars = RANY(obj)->as.scope.local_vars-1;
 	    if (!(RANY(obj)->as.scope.flags & SCOPE_CLONE) && vars[0] == 0)
 		RUBY_CRITICAL(free(RANY(obj)->as.scope.local_tbl));
-	    if (RANY(obj)->as.scope.flags & SCOPE_MALLOC)
+	    if ((RANY(obj)->as.scope.flags & (SCOPE_MALLOC|SCOPE_CLONE)) == SCOPE_MALLOC)
 		RUBY_CRITICAL(free(vars));
 	}
 	break;
@@ -1313,6 +1379,8 @@ obj_free(obj)
 	rb_bug("gc_sweep(): unknown data type 0x%lx(0x%lx)",
 	       RANY(obj)->as.basic.flags & T_MASK, obj);
     }
+
+    return 0;
 }
 
 void
@@ -1644,6 +1712,7 @@ os_obj_of(of)
 {
     int i;
     int n = 0;
+    volatile VALUE v;
 
     for (i = 0; i < heaps_used; i++) {
 	RVALUE *p, *pend;
@@ -1657,13 +1726,15 @@ os_obj_of(of)
 		  case T_VARMAP:
 		  case T_SCOPE:
 		  case T_NODE:
+		  case T_DEFERRED:
 		    continue;
 		  case T_CLASS:
 		    if (FL_TEST(p, FL_SINGLETON)) continue;
 		  default:
 		    if (!p->as.basic.klass) continue;
-		    if (!of || rb_obj_is_kind_of((VALUE)p, of)) {
-			rb_yield((VALUE)p);
+                    v = (VALUE)p;
+		    if (!of || rb_obj_is_kind_of(v, of)) {
+			rb_yield(v);
 			n++;
 		    }
 		}
@@ -1824,9 +1895,14 @@ define_final(argc, argv, os)
 		 rb_obj_classname(block));
     }
     need_call_final = 1;
-    FL_SET(obj, FL_FINALIZE);
+    if (!FL_ABLE(obj)) {
+	rb_raise(rb_eArgError, "cannot define finalizer for %s",
+		 rb_obj_classname(obj));
+    }
+    RBASIC(obj)->flags |= FL_FINALIZE;
 
     block = rb_ary_new3(2, INT2FIX(ruby_safe_level), block);
+    OBJ_FREEZE(block);
 
     if (!finalizer_table) {
 	finalizer_table = st_init_numtable();
@@ -1835,7 +1911,9 @@ define_final(argc, argv, os)
 	rb_ary_push(table, block);
     }
     else {
-	st_add_direct(finalizer_table, obj, rb_ary_new3(1, block));
+	table = rb_ary_new3(1, block);
+	RBASIC(table)->klass = 0;
+	st_add_direct(finalizer_table, obj, table);
     }
     return block;
 }
@@ -1871,7 +1949,11 @@ run_final(obj)
     VALUE args[3], table, objid;
 
     objid = rb_obj_id(obj);	/* make obj into id */
+    RBASIC(obj)->klass = 0;
     rb_thread_critical = Qtrue;
+    if (BUILTIN_TYPE(obj) == T_DEFERRED && RDATA(obj)->dfree) {
+	(*RDATA(obj)->dfree)(DATA_PTR(obj));
+    }
     args[1] = 0;
     args[2] = (VALUE)ruby_safe_level;
     for (i=0; i<RARRAY(finalizers)->len; i++) {
@@ -1910,7 +1992,7 @@ rb_gc_call_finalizer_at_exit()
     int i;
 
     /* run finalizers */
-    if (need_call_final) {
+    if (need_call_final && finalizer_table) {
 	p = deferred_final_list;
 	deferred_final_list = 0;
 	finalize_list(p);
@@ -1919,11 +2001,14 @@ rb_gc_call_finalizer_at_exit()
 	    while (p < pend) {
 		if (FL_TEST(p, FL_FINALIZE)) {
 		    FL_UNSET(p, FL_FINALIZE);
-		    p->as.basic.klass = 0;
 		    run_final((VALUE)p);
 		}
 		p++;
 	    }
+	}
+	if (finalizer_table) {
+	    st_free_table(finalizer_table);
+	    finalizer_table = 0;
 	}
     }
     /* run data object's finalizers */
@@ -1931,7 +2016,8 @@ rb_gc_call_finalizer_at_exit()
 	p = heaps[i].slot; pend = p + heaps[i].limit;
 	while (p < pend) {
 	    if (BUILTIN_TYPE(p) == T_DATA &&
-		DATA_PTR(p) && RANY(p)->as.data.dfree) {
+		DATA_PTR(p) && RANY(p)->as.data.dfree &&
+		RANY(p)->as.basic.klass != rb_cThread) {
 		p->as.free.flags = 0;
 		if ((long)RANY(p)->as.data.dfree == -1) {
 		    RUBY_CRITICAL(free(DATA_PTR(p)));
@@ -1985,7 +2071,7 @@ id2ref(obj, objid)
     }
 
     if (!is_pointer_to_heap((void *)ptr)||
-	(type = BUILTIN_TYPE(ptr)) >= T_BLKTAG || type == T_ICLASS) {
+	(type = BUILTIN_TYPE(ptr)) > T_SYMBOL || type == T_ICLASS) {
 	rb_raise(rb_eRangeError, "0x%lx is not id value", p0);
     }
     if (BUILTIN_TYPE(ptr) == 0 || RBASIC(ptr)->klass == 0) {
@@ -2101,7 +2187,10 @@ Init_GC()
     source_filenames = st_init_strtable();
 
     rb_global_variable(&nomem_error);
-    nomem_error = rb_exc_new2(rb_eNoMemError, "failed to allocate memory");
+    nomem_error = rb_exc_new3(rb_eNoMemError,
+			      rb_obj_freeze(rb_str_new2("failed to allocate memory")));
+    OBJ_TAINT(nomem_error);
+    OBJ_FREEZE(nomem_error);
 
     rb_define_method(rb_mKernel, "hash", rb_obj_id, 0);
     rb_define_method(rb_mKernel, "__id__", rb_obj_id, 0);

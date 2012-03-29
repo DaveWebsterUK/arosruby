@@ -2,11 +2,11 @@
 
   util.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2010-11-22 16:21:34 +0900 (Mon, 22 Nov 2010) $
   created at: Fri Mar 10 17:22:34 JST 1995
 
-  Copyright (C) 1993-2003 Yukihiro Matsumoto
+  Copyright (C) 1993-2008 Yukihiro Matsumoto
 
 **********************************************************************/
 
@@ -20,6 +20,9 @@
 
 #ifdef _WIN32
 #include "missing/file.h"
+#endif
+#if defined(__CYGWIN32__) || defined(_WIN32)
+#include <io.h>
 #endif
 
 #include "util.h"
@@ -50,7 +53,7 @@ scan_hex(start, len, retlen)
     int len;
     int *retlen;
 {
-    static char hexdigit[] = "0123456789abcdef0123456789ABCDEF";
+    static const char hexdigit[] = "0123456789abcdef0123456789ABCDEF";
     register const char *s = start;
     register unsigned long retval = 0;
     char *tmp;
@@ -149,85 +152,95 @@ scan_hex(start, len, retlen)
 
 static int valid_filename(char *s);
 
-static char suffix1[] = ".$$$";
-static char suffix2[] = ".~~~";
-
-#define ext (&buf[1000])
+static const char suffix1[] = ".$$$";
+static const char suffix2[] = ".~~~";
 
 #define strEQ(s1,s2) (strcmp(s1,s2) == 0)
 
+extern const char *ruby_find_basename(const char *, long *, long *);
+extern const char *ruby_find_extname(const char *, long *);
+
 void
-ruby_add_suffix(str, suffix)
-    VALUE str;
-    char *suffix;
+ruby_add_suffix(VALUE str, const char *suffix)
 {
     int baselen;
     int extlen = strlen(suffix);
-    char *s, *t, *p;
+    char *p, *q;
     long slen;
     char buf[1024];
+    const char *name;
+    const char *ext;
+    long len;
 
-    if (RSTRING(str)->len > 1000)
-        rb_fatal("Cannot do inplace edit on long filename (%ld characters)",
-		 RSTRING(str)->len);
+    name = StringValueCStr(str);
+    slen = strlen(name);
+    if (slen > sizeof(buf) - 1)
+	rb_fatal("Cannot do inplace edit on long filename (%ld characters)",
+		 slen);
 
-#if defined(DJGPP) || defined(__CYGWIN32__) || defined(_WIN32)
     /* Style 0 */
-    slen = RSTRING(str)->len;
     rb_str_cat(str, suffix, extlen);
-#if defined(DJGPP)
-    if (_USE_LFN) return;
-#else
-    if (valid_filename(RSTRING(str)->ptr)) return;
-#endif
+    if (valid_filename(RSTRING_PTR(str))) return;
 
     /* Fooey, style 0 failed.  Fix str before continuing. */
-    RSTRING(str)->ptr[RSTRING(str)->len = slen] = '\0';
-#endif
-
-    slen = extlen;
-    t = buf; baselen = 0; s = RSTRING(str)->ptr;
-    while ((*t = *s) && *s != '.') {
-	baselen++;
-	if (*s == '\\' || *s == '/') baselen = 0;
- 	s++; t++;
-    }
-    p = t;
-
-    t = ext; extlen = 0;
-    while (*t++ = *s++) extlen++;
-    if (extlen == 0) { ext[0] = '.'; ext[1] = 0; extlen++; }
+    rb_str_resize(str, slen);
+    name = StringValueCStr(str);
+    ext = ruby_find_extname(name, &len);
 
     if (*suffix == '.') {        /* Style 1 */
-        if (strEQ(ext, suffix)) goto fallback;
-	strcpy(p, suffix);
+	if (ext) {
+	    if (strEQ(ext, suffix)) goto fallback;
+	    slen = ext - name;
+	}
+	rb_str_resize(str, slen);
+	rb_str_cat(str, suffix, extlen);
     }
-    else if (suffix[1] == '\0') {  /* Style 2 */
-        if (extlen < 4) { 
-	    ext[extlen] = *suffix;
-	    ext[++extlen] = '\0';
-        }
-	else if (baselen < 8) {
-   	    *p++ = *suffix;
+    else {
+	strncpy(buf, name, slen);
+	if (ext)
+	    p = buf + (ext - name);
+	else
+	    p = buf + slen;
+	p[len] = '\0';
+	if (suffix[1] == '\0') {  /* Style 2 */
+	    if (len <= 3) {
+		p[len] = *suffix;
+		p[++len] = '\0';
+	    }
+	    else if ((q = (char *)ruby_find_basename(buf, &baselen, 0)) &&
+		     baselen < 8) {
+		q += baselen;
+		*q++ = *suffix;
+		if (ext) {
+		    strncpy(q, ext, ext - name);
+		    q[ext - name + 1] = '\0';
+		}
+		else
+		    *q = '\0';
+	    }
+	    else if (len == 4 && p[3] != *suffix)
+		p[3] = *suffix;
+	    else if (baselen == 8 && q[7] != *suffix)
+		q[7] = *suffix;
+	    else
+		goto fallback;
 	}
-	else if (ext[3] != *suffix) {
-	    ext[3] = *suffix;
+	else { /* Style 3:  Panic */
+	  fallback:
+	    (void)memcpy(p, !ext || strEQ(ext, suffix1) ? suffix2 : suffix1, 5);
 	}
-	else if (buf[7] != *suffix) {
-	    buf[7] = *suffix;
-	}
-	else goto fallback;
-	strcpy(p, ext);
-    }
-    else { /* Style 3:  Panic */
-fallback:
-	(void)memcpy(p, strEQ(ext, suffix1) ? suffix2 : suffix1, 5);
     }
     rb_str_resize(str, strlen(buf));
-    memcpy(RSTRING(str)->ptr, buf, RSTRING(str)->len);
+    memcpy(RSTRING_PTR(str), buf, RSTRING_LEN(str));
 }
 
 #if defined(__CYGWIN32__) || defined(_WIN32)
+#if defined __CYGWIN32__ || defined __MINGW32__
+extern int _open(const char *, int, ...);
+extern int _close(int);
+extern int _unlink(const char *);
+#endif
+
 static int 
 valid_filename(char *s)
 {
@@ -947,23 +960,25 @@ Exactly one of IEEE_LITTLE_ENDIAN, IEEE_BIG_ENDIAN, VAX, or IBM should be define
 typedef union { double d; ULong L[2]; } U;
 
 #ifdef YES_ALIAS
-#define dval(x) x
-#ifdef IEEE_LITTLE_ENDIAN
-#define word0(x) ((ULong *)&x)[1]
-#define word1(x) ((ULong *)&x)[0]
+typedef double double_u;
+#  define dval(x) x
+#  ifdef IEEE_LITTLE_ENDIAN
+#    define word0(x) (((ULong *)&x)[1])
+#    define word1(x) (((ULong *)&x)[0])
+#  else
+#    define word0(x) (((ULong *)&x)[0])
+#    define word1(x) (((ULong *)&x)[1])
+#  endif
 #else
-#define word0(x) ((ULong *)&x)[0]
-#define word1(x) ((ULong *)&x)[1]
-#endif
-#else
-#ifdef IEEE_LITTLE_ENDIAN
-#define word0(x) ((U*)&x)->L[1]
-#define word1(x) ((U*)&x)->L[0]
-#else
-#define word0(x) ((U*)&x)->L[0]
-#define word1(x) ((U*)&x)->L[1]
-#endif
-#define dval(x) ((U*)&x)->d
+typedef U double_u;
+#  ifdef IEEE_LITTLE_ENDIAN
+#    define word0(x) (x.L[1])
+#    define word1(x) (x.L[0])
+#  else
+#    define word0(x) (x.L[0])
+#    define word1(x) (x.L[1])
+#  endif
+#  define dval(x) (x.d)
 #endif
 
 /* The following definition of Storeinc is appropriate for MIPS processors.
@@ -1693,10 +1708,11 @@ diff(Bigint *a, Bigint *b)
 }
 
 static double
-ulp(double x)
+ulp(double x_)
 {
     register Long L;
-    double a;
+    double_u x, a;
+    dval(x) = x_;
 
     L = (word0(x) & Exp_mask) - (P-1)*Exp_msk1;
 #ifndef Avoid_Underflow
@@ -1734,7 +1750,7 @@ b2d(Bigint *a, int *e)
 {
     ULong *xa, *xa0, w, y, z;
     int k;
-    double d;
+    double_u d;
 #ifdef VAX
     ULong d0, d1;
 #else
@@ -1795,8 +1811,9 @@ ret_d:
 }
 
 static Bigint *
-d2b(double d, int *e, int *bits)
+d2b(double d_, int *e, int *bits)
 {
+    double_u d;
     Bigint *b;
     int de, k;
     ULong *x, y, z;
@@ -1805,6 +1822,9 @@ d2b(double d, int *e, int *bits)
 #endif
 #ifdef VAX
     ULong d0, d1;
+#endif
+    dval(d) = d_;
+#ifdef VAX
     d0 = word0(d) >> 16 | word0(d) << 16;
     d1 = word1(d) >> 16 | word1(d) << 16;
 #else
@@ -1930,7 +1950,7 @@ d2b(double d, int *e, int *bits)
 static double
 ratio(Bigint *a, Bigint *b)
 {
-    double da, db;
+    double_u da, db;
     int k, ka, kb;
 
     dval(da) = b2d(a, &ka);
@@ -2089,7 +2109,8 @@ ruby_strtod(const char *s00, char **se)
     int bb2, bb5, bbe, bd2, bd5, bbbits, bs2, c, dsign,
          e, e1, esign, i, j, k, nd, nd0, nf, nz, nz0, sign;
     const char *s, *s0, *s1;
-    double aadj, aadj1, adj, rv, rv0;
+    double aadj, adj;
+    double_u aadj1, rv, rv0;
     Long L;
     ULong y, z;
     Bigint *bb, *bb1, *bd, *bd0, *bs, *delta;
@@ -2103,6 +2124,7 @@ ruby_strtod(const char *s00, char **se)
     const char *s2;
 #endif
 
+    errno = 0;
     sign = nz0 = nz = 0;
     dval(rv) = 0.;
     for (s = s00;;s++)
@@ -2161,6 +2183,8 @@ break2:
     }
 #endif
     if (c == '.') {
+        if (!ISDIGIT(s[1]))
+            goto dig_done;
         c = *++s;
         if (!nd) {
             for (; c == '0'; c = *++s)
@@ -2282,7 +2306,7 @@ ret0:
 #endif
         dval(rv) = tens[k - 9] * dval(rv) + z;
     }
-    bd0 = 0;
+    bd0 = bb = bd = bs = delta = 0;
     if (nd <= DBL_DIG
 #ifndef RND_PRODQUOT
 #ifndef Honor_FLT_ROUNDS
@@ -2785,14 +2809,14 @@ drop_down:
         }
         if ((aadj = ratio(delta, bs)) <= 2.) {
             if (dsign)
-                aadj = aadj1 = 1.;
+                aadj = dval(aadj1) = 1.;
             else if (word1(rv) || word0(rv) & Bndry_mask) {
 #ifndef Sudden_Underflow
                 if (word1(rv) == Tiny1 && !word0(rv))
                     goto undfl;
 #endif
                 aadj = 1.;
-                aadj1 = -1.;
+                dval(aadj1) = -1.;
             }
             else {
                 /* special case -- power of FLT_RADIX to be */
@@ -2802,12 +2826,12 @@ drop_down:
                     aadj = 1./FLT_RADIX;
                 else
                     aadj *= 0.5;
-                aadj1 = -aadj;
+                dval(aadj1) = -aadj;
             }
         }
         else {
             aadj *= 0.5;
-            aadj1 = dsign ? aadj : -aadj;
+            dval(aadj1) = dsign ? aadj : -aadj;
 #ifdef Check_FLT_ROUNDS
             switch (Rounding) {
               case 2: /* towards +infinity */
@@ -2819,7 +2843,7 @@ drop_down:
             }
 #else
             if (Flt_Rounds == 0)
-                aadj1 += 0.5;
+                dval(aadj1) += 0.5;
 #endif /*Check_FLT_ROUNDS*/
         }
         y = word0(rv) & Exp_mask;
@@ -2829,7 +2853,7 @@ drop_down:
         if (y == Exp_msk1*(DBL_MAX_EXP+Bias-1)) {
             dval(rv0) = dval(rv);
             word0(rv) -= P*Exp_msk1;
-            adj = aadj1 * ulp(dval(rv));
+            adj = dval(aadj1) * ulp(dval(rv));
             dval(rv) += adj;
             if ((word0(rv) & Exp_mask) >=
                     Exp_msk1*(DBL_MAX_EXP+Bias-P)) {
@@ -2849,11 +2873,11 @@ drop_down:
                     if ((z = aadj) <= 0)
                         z = 1;
                     aadj = z;
-                    aadj1 = dsign ? aadj : -aadj;
+                    dval(aadj1) = dsign ? aadj : -aadj;
                 }
                 word0(aadj1) += (2*P+1)*Exp_msk1 - y;
             }
-            adj = aadj1 * ulp(dval(rv));
+            adj = dval(aadj1) * ulp(dval(rv));
             dval(rv) += adj;
 #else
 #ifdef Sudden_Underflow
@@ -3104,12 +3128,14 @@ nrv_alloc(const char *s, char **rve, int n)
 {
     char *rv, *t;
 
-    t = rv = rv_alloc(n);
+    t = rv = rv_alloc(n+1);
     while ((*t = *s++) != 0) t++;
     if (rve)
         *rve = t;
     return rv;
 }
+
+#define rv_strdup(s, rve) nrv_alloc(s, rve, strlen(s)+1)
 
 /* freedtoa(s) must be used to free values s returned by dtoa
  * when MULTIPLE_THREADS is #defined.  It should be used in all cases,
@@ -3164,7 +3190,7 @@ freedtoa(char *s)
  */
 
 char *
-dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
+dtoa(double d_, int mode, int ndigits, int *decpt, int *sign, char **rve)
 {
  /* Arguments ndigits, decpt, sign are similar to those
     of ecvt and fcvt; trailing zeros are suppressed from
@@ -3208,8 +3234,9 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
     int denorm;
     ULong x;
 #endif
-    Bigint *b, *b1, *delta, *mlo, *mhi, *S;
-    double d2, ds, eps;
+    Bigint *b, *b1, *delta, *mlo = 0, *mhi = 0, *S;
+    double ds;
+    double_u d, d2, eps;
     char *s, *s0;
 #ifdef Honor_FLT_ROUNDS
     int rounding;
@@ -3217,6 +3244,8 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
 #ifdef SET_INEXACT
     int inexact, oldinexact;
 #endif
+
+    dval(d) = d_;
 
 #ifndef MULTIPLE_THREADS
     if (dtoa_result) {
@@ -3244,9 +3273,9 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
         *decpt = 9999;
 #ifdef IEEE_Arith
         if (!word1(d) && !(word0(d) & 0xfffff))
-            return nrv_alloc("Infinity", rve, 8);
+            return rv_strdup("Infinity", rve);
 #endif
-        return nrv_alloc("NaN", rve, 3);
+        return rv_strdup("NaN", rve);
     }
 #endif
 #ifdef IBM
@@ -3254,7 +3283,7 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
 #endif
     if (!dval(d)) {
         *decpt = 1;
-        return nrv_alloc("0", rve, 1);
+        return rv_strdup("0", rve);
     }
 
 #ifdef SET_INEXACT
@@ -3397,7 +3426,7 @@ dtoa(double d, int mode, int ndigits, int *decpt, int *sign, char **rve)
         if (i <= 0)
             i = 1;
     }
-    s = s0 = rv_alloc(i);
+    s = s0 = rv_alloc(i+1);
 
 #ifdef Honor_FLT_ROUNDS
     if (mode > 1 && rounding != 1)
@@ -3561,7 +3590,6 @@ bump_up:
 
     m2 = b2;
     m5 = b5;
-    mhi = mlo = 0;
     if (leftright) {
         i =
 #ifndef Sudden_Underflow

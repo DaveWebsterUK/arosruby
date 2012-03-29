@@ -2,8 +2,8 @@
 
   variable.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 20:44:49 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2011-06-02 19:02:20 +0900 (Thu, 02 Jun 2011) $
   created at: Tue Apr 19 23:55:15 JST 1994
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -647,6 +647,7 @@ rb_f_untrace_var(argc, argv)
     struct trace_var *trace;
     st_data_t data;
 
+    rb_secure(4);
     rb_scan_args(argc, argv, "11", &var, &cmd);
     id = rb_to_id(var);
     if (!st_lookup(rb_global_tbl, id, &data)) {
@@ -1330,23 +1331,49 @@ autoload_delete(mod, id)
     VALUE val;
     st_data_t load = 0;
 
-    st_delete(RCLASS(mod)->iv_tbl, (st_data_t*)&id, 0);
     if (st_lookup(RCLASS(mod)->iv_tbl, autoload, &val)) {
 	struct st_table *tbl = check_autoload_table(val);
 
 	st_delete(tbl, (st_data_t*)&id, &load);
 
 	if (tbl->num_entries == 0) {
-	    DATA_PTR(val) = 0;
-	    st_free_table(tbl);
 	    id = autoload;
-	    if (st_delete(RCLASS(mod)->iv_tbl, (st_data_t*)&id, &val)) {
-		rb_gc_force_recycle(val);
-	    }
+	    st_delete(RCLASS(mod)->iv_tbl, (st_data_t*)&id, &val);
 	}
     }
 
     return (NODE *)load;
+}
+
+static NODE *
+autoload_node(mod, id)
+    VALUE mod;
+    ID id;
+{
+    st_data_t val, load, n = id;
+    struct st_table *p, *q;
+
+    if ((p = RCLASS(mod)->iv_tbl) == 0) {
+        return 0;
+    }
+    else if (!st_lookup(p, n, &val)) {
+        return 0;
+    }
+    else if (val != Qundef) {
+        return 0;
+    }
+    else if (!st_lookup(p, autoload, &val)) {
+        return 0;
+    }
+    else if ((q = check_autoload_table((VALUE)val)) == 0) {
+        return 0;
+    }
+    else if (!st_lookup(q, n, &load)) {
+        return 0;
+    }
+    else {
+        return (NODE *)load;
+    }
 }
 
 VALUE
@@ -1354,13 +1381,19 @@ rb_autoload_load(klass, id)
     VALUE klass;
     ID id;
 {
-    VALUE file;
-    NODE *load = autoload_delete(klass, id);
+    NODE *load = 0;
+    VALUE ret = 0;
 
-    if (!load || !(file = load->nd_lit) || rb_provided(RSTRING(file)->ptr)) {
-	return Qfalse;
+    if ((load = autoload_node(klass, id)) == 0) {
+        return 0;
     }
-    return rb_require_safe(file, load->nd_nth);
+    else if ((ret = rb_require_safe(load->nd_lit, load->nd_nth)) == Qfalse) {
+        return 0;
+    }
+    else {
+        (void) autoload_delete(klass, id);
+        return ret;
+    }
 }
 
 static VALUE
@@ -1388,12 +1421,8 @@ autoload_file(mod, id)
     /* already loaded but not defined */
     st_delete(tbl, (st_data_t*)&id, 0);
     if (!tbl->num_entries) {
-	DATA_PTR(val) = 0;
-	st_free_table(tbl);
 	id = autoload;
-	if (st_delete(RCLASS(mod)->iv_tbl, (st_data_t*)&id, &val)) {
-	    rb_gc_force_recycle(val);
-	}
+	st_delete(RCLASS(mod)->iv_tbl, (st_data_t*)&id, &val);
     }
     return Qnil;
 }
@@ -1426,8 +1455,15 @@ rb_const_get_0(klass, id, exclude, recurse)
     while (tmp) {
 	while (RCLASS(tmp)->iv_tbl && st_lookup(RCLASS(tmp)->iv_tbl,id,&value)) {
 	    if (value == Qundef) {
-		if (!RTEST(rb_autoload_load(tmp, id))) break;
-		continue;
+		rb_autoload_load(tmp, id);
+                st_lookup(RCLASS(tmp)->iv_tbl, id, &value);
+                if (value == Qundef) {
+                    /* the autoload above did not assign a constant */
+                    break;
+                }
+                else {
+                    continue;
+                }
 	    }
 	    if (exclude && tmp == rb_cObject && klass != rb_cObject) {
 		rb_warn("toplevel constant %s referenced by %s::%s",

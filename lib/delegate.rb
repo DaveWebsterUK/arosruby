@@ -151,21 +151,21 @@ class Delegator
   alias initialize_methods initialize
 
   # Handles the magic of delegation through \_\_getobj\_\_.
-  def method_missing(m, *args)
+  def method_missing(m, *args, &block)
     target = self.__getobj__
     unless target.respond_to?(m)
-      super(m, *args)
+      super(m, *args, &block)
     end
-    target.__send__(m, *args)
+    target.__send__(m, *args, &block)
   end
 
   # 
   # Checks for a method provided by this the delegate object by fowarding the 
   # call through \_\_getobj\_\_.
   # 
-  def respond_to?(m)
+  def respond_to?(m, include_private = false)
     return true if super
-    return self.__getobj__.respond_to?(m)
+    return self.__getobj__.respond_to?(m, include_private)
   end
 
   #
@@ -250,7 +250,7 @@ SimpleDelegater = SimpleDelegator
 # your class.
 #
 #   class MyClass < DelegateClass( ClassToDelegateTo )    # Step 1
-#     def initiaize
+#     def initialize
 #       super(obj_of_ClassToDelegateTo)                   # Step 2
 #     end
 #   end
@@ -264,15 +264,15 @@ def DelegateClass(superclass)
     def initialize(obj)  # :nodoc:
       @_dc_obj = obj
     end
-    def method_missing(m, *args)  # :nodoc:
+    def method_missing(m, *args, &block)  # :nodoc:
       unless @_dc_obj.respond_to?(m)
-        super(m, *args)
+        super(m, *args, &block)
       end
-      @_dc_obj.__send__(m, *args)
+      @_dc_obj.__send__(m, *args, &block)
     end
-    def respond_to?(m)  # :nodoc:
+    def respond_to?(m, include_private = false)  # :nodoc:
       return true if super
-      return @_dc_obj.respond_to?(m)
+      return @_dc_obj.respond_to?(m, include_private)
     end
     def __getobj__  # :nodoc:
       @_dc_obj

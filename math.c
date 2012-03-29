@@ -2,8 +2,8 @@
 
   math.c -
 
-  $Author: mame $
-  $Date: 2008-01-25 22:34:13 +0900 (Fri, 25 Jan 2008) $
+  $Author: shyouhei $
+  $Date: 2008-07-02 18:26:29 +0900 (Wed, 02 Jul 2008) $
   created at: Tue Jan 25 14:12:56 JST 1994
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -34,7 +34,7 @@ domain_check(x, msg)
 	if (isnan(x)) {
 #if defined(EDOM)
 	    errno = EDOM;
-#elif define(ERANGE)
+#elif defined(ERANGE)
 	    errno = ERANGE;
 #endif
 	    continue;

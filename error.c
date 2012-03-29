@@ -2,8 +2,8 @@
 
   error.c -
 
-  $Author: knu $
-  $Date: 2008-05-31 22:37:06 +0900 (Sat, 31 May 2008) $
+  $Author: shyouhei $
+  $Date: 2011-02-18 21:32:35 +0900 (Fri, 18 Feb 2011) $
   created at: Mon Aug  9 16:11:34 JST 1993
 
   Copyright (C) 1993-2003 Yukihiro Matsumoto
@@ -333,7 +333,7 @@ rb_exc_new3(etype, str)
     VALUE etype, str;
 {
     StringValue(str);
-    return rb_exc_new(etype, RSTRING(str)->ptr, RSTRING(str)->len);
+    return rb_funcall(etype, rb_intern("new"), 1, str);
 }
 
 /*
@@ -403,7 +403,6 @@ exc_to_s(exc)
     VALUE mesg = rb_attr_get(exc, rb_intern("mesg"));
 
     if (NIL_P(mesg)) return rb_class_name(CLASS_OF(exc));
-    if (OBJ_TAINTED(exc)) OBJ_TAINT(mesg);
     return mesg;
 }
 
@@ -667,10 +666,9 @@ name_err_to_s(exc)
     if (NIL_P(mesg)) return rb_class_name(CLASS_OF(exc));
     StringValue(str);
     if (str != mesg) {
-	rb_iv_set(exc, "mesg", mesg = str);
+	OBJ_INFECT(str, mesg);
     }
-    if (OBJ_TAINTED(exc)) OBJ_TAINT(mesg);
-    return mesg;
+    return str;
 }
 
 /*

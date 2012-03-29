@@ -110,4 +110,65 @@ class TestFloat < Test::Unit::TestCase
     assert_equal(-3.5, (-11.5).remainder(4))
     assert_equal(-3.5, (-11.5).remainder(-4))
   end
+
+  def test_to_i
+    assert_operator(4611686018427387905.0.to_i, :>, 0)
+    assert_operator(4611686018427387904.0.to_i, :>, 0)
+    assert_operator(4611686018427387903.8.to_i, :>, 0)
+    assert_operator(4611686018427387903.5.to_i, :>, 0)
+    assert_operator(4611686018427387903.2.to_i, :>, 0)
+    assert_operator(4611686018427387903.0.to_i, :>, 0)
+    assert_operator(4611686018427387902.0.to_i, :>, 0)
+
+    assert_operator(1073741825.0.to_i, :>, 0)
+    assert_operator(1073741824.0.to_i, :>, 0)
+    assert_operator(1073741823.8.to_i, :>, 0)
+    assert_operator(1073741823.5.to_i, :>, 0)
+    assert_operator(1073741823.2.to_i, :>, 0)
+    assert_operator(1073741823.0.to_i, :>, 0)
+    assert_operator(1073741822.0.to_i, :>, 0)
+
+    assert_operator((-1073741823.0).to_i, :<, 0)
+    assert_operator((-1073741824.0).to_i, :<, 0)
+    assert_operator((-1073741824.2).to_i, :<, 0)
+    assert_operator((-1073741824.5).to_i, :<, 0)
+    assert_operator((-1073741824.8).to_i, :<, 0)
+    assert_operator((-1073741825.0).to_i, :<, 0)
+    assert_operator((-1073741826.0).to_i, :<, 0)
+
+    assert_operator((-4611686018427387903.0).to_i, :<, 0)
+    assert_operator((-4611686018427387904.0).to_i, :<, 0)
+    assert_operator((-4611686018427387904.2).to_i, :<, 0)
+    assert_operator((-4611686018427387904.5).to_i, :<, 0)
+    assert_operator((-4611686018427387904.8).to_i, :<, 0)
+    assert_operator((-4611686018427387905.0).to_i, :<, 0)
+    assert_operator((-4611686018427387906.0).to_i, :<, 0)
+  end
+
+  def test_cmp
+    inf = 1.0 / 0.0
+    nan = inf / inf
+    assert_equal(0, 1.0 <=> 1.0)
+    assert_equal(1, 1.0 <=> 0.0)
+    assert_equal(-1, 1.0 <=> 2.0)
+    assert_nil(1.0 <=> nil)
+    assert_nil(1.0 <=> nan)
+    assert_nil(nan <=> 1.0)
+
+    assert_equal(0, 1.0 <=> 1)
+    assert_equal(1, 1.0 <=> 0)
+    assert_equal(-1, 1.0 <=> 2)
+
+    assert_equal(-1, 1.0 <=> 2**32)
+
+    assert_equal(1, inf <=> (Float::MAX.to_i*2))
+    assert_equal(-1, -inf <=> (-Float::MAX.to_i*2))
+    assert_equal(-1, (Float::MAX.to_i*2) <=> inf)
+    assert_equal(1, (-Float::MAX.to_i*2) <=> -inf)
+
+    assert_raise(ArgumentError) { 1.0 > nil }
+    assert_raise(ArgumentError) { 1.0 >= nil }
+    assert_raise(ArgumentError) { 1.0 < nil }
+    assert_raise(ArgumentError) { 1.0 <= nil }
+  end
 end
