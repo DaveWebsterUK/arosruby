@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Set this variable to point to your AROS hosted system directory
-aros_dir="/home/david/Downloads/AROS-20120323-linux-i386-system"
-aros_gcc="/home/david/Downloads/AROS-20120323-source/bin/linux-i386/tools/crosstools/i386-aros-gcc"
+aros_dir="/home/david/Downloads/AROS-20120626-source/bin/linux-i386/AROS"
+aros_gcc="/home/david/Downloads/AROS-20120626-source/bin/linux-i386/tools/crosstools/i386-aros-gcc"
 
 if [ $aros_dir = "NULL" ]; then
 	echo "**************************************************"

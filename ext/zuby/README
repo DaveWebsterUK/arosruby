@@ -1,0 +1,10 @@
+== Notes ==
+
+This is the Zuby extension for arosruby which provides an interface for Ruby programmers to the Zune GUI API in AROS.  This extension consists of two parts:
+
+1) The Ruby C extension 'zuby.c' which communicates with Zune/MUI.
+2) The Ruby programmer API in the 'lib' directory.  At the start this will be based on GTK2 and is guided by the GTK2 part of Ruby-Gnome2 from http://ruby-gnome2.sourceforge.jp/ .  rubyaros also includes a quick parser for Glade/GTKBuilder files which currently supports a minimal set of widgets.
+
+This is currently a very early version, so your mileage may vary, however, some of the tutorials from Ruby-Gnome2 work, however, not all widgets are implemented yet.
+
+
