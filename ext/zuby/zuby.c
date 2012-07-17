@@ -49,7 +49,7 @@ MakeHook(myCallbackHook, myCallback);
 
 static VALUE zuby_init_object(VALUE self)
 {
-    printf("%s\n","ZUBY init object()");
+    //printf("%s\n","ZUBY init object()");
   return self;
 }
 
@@ -90,7 +90,7 @@ LONG test_DisplayFunc(struct Hook *hook, char **array, VALUE *pRow)
 void setup_gui()
 {
 	//Amiga stuff
-	printf("GUI Creation\n");
+	//printf("GUI Creation\n");
  
     // GUI creation
     mui_app = ApplicationObject,
@@ -112,7 +112,7 @@ void setup_gui()
 
 void zuby_mainloop()
 {
-  printf("%s\n","Starting Main Zuby loop");
+  //printf("%s\n","Starting Main Zuby loop");
   
   //Collect the root object or build one if not already defined
   
@@ -127,7 +127,7 @@ void zuby_mainloop()
 			 // Open the window
 			set(mui_wnd, MUIA_Window_Open, TRUE);
 	 
-			printf("Create application\n");
+			//printf("Create application\n");
 		}
 		else
 		{
@@ -136,13 +136,13 @@ void zuby_mainloop()
 		
 		
 		
-    printf("Main Loop\n");
+    //printf("Main Loop\n");
     
     ULONG sigs = 0;   
 	// Check that the window opened
 	if (XGET(mui_wnd, MUIA_Window_Open))
 	{
-		printf("Window Open Check = Okay\n");
+		//printf("Window Open Check = Okay\n");
 		
 		// Main loop
 		while((LONG)DoMethod(mui_app, MUIM_Application_NewInput, (IPTR)&sigs)
@@ -161,7 +161,7 @@ void zuby_mainloop()
 		printf("Window Open Check = FAIL\n");
 	}
 	
-	printf("Disposing\n");
+	//printf("Disposing\n");
 	// Destroy our application and all its objects
 	MUI_DisposeObject(mui_app);		
 }
@@ -304,7 +304,7 @@ static VALUE zuby_buildMUICheck(VALUE self)
 static VALUE zuby_buildMUIRadio(VALUE self, VALUE pStringArray)
 {
 	int stringArraySize = RARRAY(pStringArray)->len;
-	printf("List size = %d\n", stringArraySize);
+	//printf("List size = %d\n", stringArraySize);
 	
 	// One additional element for the closing NULL
 	STRPTR *str = AllocVec(sizeof(STRPTR) * (stringArraySize + 1), MEMF_ANY | MEMF_CLEAR);
@@ -354,7 +354,7 @@ static VALUE zuby_buildMUIMenuItem(VALUE self, VALUE pTitle)
     const char *tTitle = STR2CSTR(pTitle);
     Object *tMenuItem = MenuitemObject, MUIA_Menuitem_Title, tTitle, End;
 
-    printf("BUILDING MENU ITEM\n");
+    //printf("BUILDING MENU ITEM\n");
 
     VALUE tdata = Data_Wrap_Struct(MyMUIClass, 0, NULL, tMenuItem);
     return tdata;
@@ -362,7 +362,7 @@ static VALUE zuby_buildMUIMenuItem(VALUE self, VALUE pTitle)
 
 static VALUE zuby_buildMUIMenuSeparatorItem(VALUE self)
 {
-    printf("BUILDING MENU ITEM\n");
+    //printf("BUILDING MENU ITEM\n");
     Object *tMenuItem = MenuitemObject, MUIA_Menuitem_Title, NM_BARLABEL, End;
 
     VALUE tdata = Data_Wrap_Struct(MyMUIClass, 0, NULL, tMenuItem);
@@ -462,12 +462,12 @@ static VALUE zuby_setListViewColumnFormat(VALUE self, VALUE pListView, VALUE pFo
     
     const char *tFormat = STR2CSTR(pFormat);
     
-    printf("SETTING ZUNE COLUMN STRING = %s\n", tFormat);
+    //printf("SETTING ZUNE COLUMN STRING = %s\n", tFormat);
     
     SET(tListview, MUIA_List_Format, tFormat);
 			
 		char *tFormatDEBUG = XGET(tListview, MUIA_List_Format);	
-		printf("GETTING ZUNE COLUMN STRING = %s\n", tFormatDEBUG);	
+		//printf("GETTING ZUNE COLUMN STRING = %s\n", tFormatDEBUG);	
 
   return Qnil;
 }
@@ -485,7 +485,7 @@ static VALUE zuby_addMUIObject(VALUE self, VALUE pParent, VALUE pObject)
 	  DoMethod(tParent,MUIM_Group_InitChange);
 
 		DoMethod(tParent, OM_ADDMEMBER, tObject);
-		printf("DoMethod(tParent, OM_ADDMEMBER, tObject);\n");
+		//printf("DoMethod(tParent, OM_ADDMEMBER, tObject);\n");
 
 	   DoMethod(tParent,MUIM_Group_ExitChange);
 
@@ -509,14 +509,14 @@ static VALUE zuby_moveMUIObject(VALUE self, VALUE pNewParent, VALUE pObject)
 	//This should allow for run-time changes
 	if (DoMethod(tCurrentParent,MUIM_Group_InitChange))
 	{
-	    printf("REMOVING\n");
+	    //printf("REMOVING\n");
 	    DoMethod(tCurrentParent,OM_REMMEMBER,tObject);
 	
 	    DoMethod(tCurrentParent,MUIM_Group_ExitChange);
 	    	    
     	if (DoMethod(tNewParent,MUIM_Group_InitChange))
       {
-          printf("ADDING\n");
+          //printf("ADDING\n");
           DoMethod(tNewParent, OM_ADDMEMBER, tObject);
 
           DoMethod(tNewParent,MUIM_Group_ExitChange);
@@ -582,7 +582,7 @@ static VALUE zuby_setMUIApplicationQuit(VALUE self)
 // The initialization method for this module
 void Init_zuby()
 {
-  printf("%s\n","Init_zuby()");
+  //printf("%s\n","Init_zuby()");
 
   //ZUBY
   MyMUIClass = rb_define_class("Zuby", rb_cObject);
